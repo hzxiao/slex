@@ -40,3 +40,12 @@ func ParseYamlBytes(data []byte) (*Config, error) {
 	}
 	return &cfg, nil
 }
+
+func (c *Config) CheckAccess(name, token string) bool {
+	for _, access := range c.Access {
+		if access.Name == name && access.Token == token {
+			return true
+		}
+	}
+	return false
+}

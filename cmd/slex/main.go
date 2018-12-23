@@ -4,6 +4,7 @@ import (
 	"fmt"
 	flag "github.com/spf13/pflag"
 	"os"
+	"os/signal"
 )
 
 const version = "0.0.1"
@@ -39,6 +40,11 @@ func main() {
 		printUsage()
 		exit(1)
 	}
+
+	wc := make(chan os.Signal, 1)
+	signal.Notify(wc, os.Interrupt, os.Kill)
+	<-wc
+	fmt.Println("close slex...")
 }
 
 func printVersion() {
