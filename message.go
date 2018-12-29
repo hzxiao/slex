@@ -1,7 +1,8 @@
 package slex
 
 const (
-	CmdChannelConnect = 0x01
+	CmdChannelConnect     = 0x01
+	CmdChannelConnectResp = 0x02
 )
 
 type Message struct {

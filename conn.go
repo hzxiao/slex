@@ -2,6 +2,7 @@ package slex
 
 import (
 	"fmt"
+	"github.com/hzxiao/goutil"
 	"io"
 )
 
@@ -72,4 +73,12 @@ func (c *conn) Write(data []byte) (int, error) {
 
 func (c *conn) Close() error {
 	return c.Raw.Close()
+}
+
+func writeJson(conn Conn, cmd byte, data goutil.Map) (int, error) {
+	body, _ := jsonEncode(data)
+	return conn.WriteMessage(&Message{
+		Cmd:  cmd,
+		Body: body,
+	})
 }

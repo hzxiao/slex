@@ -6,6 +6,7 @@ import (
 	"github.com/hzxiao/goutil/log"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Channel struct {
 	Conn
 
 	s          *Slex
+	Name       string
 	Enable     bool
 	RemoteAddr string
 	Token      string
@@ -39,12 +41,16 @@ func (c *Channel) Dial() (err error) {
 	return nil
 }
 
-func (c *Channel) Connect() error {
+func (c *Channel) Connect() (err error) {
+	err = c.Dial()
+	if err != nil {
+		return err
+	}
 	body, _ := jsonEncode(goutil.Map{
 		"name":  c.s.Config.Name,
 		"token": c.Token,
 	})
-	_, err := c.WriteMessage(&Message{
+	_, err = c.WriteMessage(&Message{
 		Cmd:  CmdChannelConnect,
 		Body: body,
 	})
@@ -57,10 +63,9 @@ func (c *Channel) loopRead() {
 		log.Info("[Channel] channel(%v) stop reading", c.RemoteAddr)
 	}()
 
-	for c.State == ChanStateConnected {
+	for {
 		msg, err := c.ReadMessage()
 		if err == io.EOF {
-			c.Close()
 			return
 		}
 
@@ -76,12 +81,25 @@ func (c *Channel) Handle(msg *Message) error {
 		return fmt.Errorf("invalid message: null msg")
 	}
 	switch msg.Cmd {
-
+	case CmdChannelConnectResp:
+		data, err := jsonDecode(msg.Body)
+		if err != nil {
+			return err
+		}
+		if data.GetString("result") == "success" {
+			log.Info("[Channel] channel connect to server(%v) success", c.RemoteAddr)
+			atomic.StoreUint32(&c.State, ChanStateConnected)
+		} else {
+			log.Error("[Channel] channal connect to server(%v) fail: %v", c.RemoteAddr, data.GetString("message"))
+			c.Close()
+		}
 	default:
+		c.Close()
+		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}
 	return nil
 }
 
 func (c *Channel) Close() error {
-	return nil
+	return c.Conn.Close()
 }

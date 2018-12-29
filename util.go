@@ -21,7 +21,7 @@ func jsonEncode(data goutil.Map) ([]byte, error) {
 }
 
 func jsonDecode(buf []byte) (goutil.Map, error) {
-	var data goutil.Map
+	var data = goutil.Map{}
 	err := json.Unmarshal(buf, &data)
 	return data, err
 }
