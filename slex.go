@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	SchemaTCP = "tcp"
-	SchemaVNC = "vnc"
-	SchemaRDP = "rdp"
+	SchemeTCP = "tcp"
+	SchemeVNC = "vnc"
+	SchemeRDP = "rdp"
 )
 
 type Slex struct {
@@ -68,7 +68,7 @@ func (s *Slex) EstablishChannels() (err error) {
 }
 
 func (s *Slex) listenAndAccept() error {
-	listen, err := net.Listen(SchemaTCP, s.Config.Listen)
+	listen, err := net.Listen(SchemeTCP, s.Config.Listen)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,6 @@ func (s *Slex) handle(raw net.Conn) {
 		conn.Close()
 		return
 	}
-
 	if firstMsg.Cmd != CmdChannelConnect {
 		log.Warn("[Slex] recv first cmd is not 'connect' from raw（%v)", raw.RemoteAddr())
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
@@ -142,6 +141,11 @@ func (s *Slex) handle(raw net.Conn) {
 		conn.Close()
 		return
 	}
+
+	writeJson(conn, CmdChannelConnectResp, goutil.Map{
+		"result": "success",
+	})
+	log.Info("[Slex] auth success and add a new channel(%v), addr(%v)", data.GetString("name"), raw.RemoteAddr())
 
 	//add a new channel
 	channel := &Channel{

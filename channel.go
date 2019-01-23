@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
-	"io"
 	"net"
 	"sync/atomic"
 	"time"
 )
 
 const (
-	ChanStateUnconnected uint32 = 0
+	ChanStateUnconnected uint32 = iota
 	ChanStateConnected
 	ChanStateClosed
 	ChanStateFoNoPerm //no permission to connect server
@@ -33,7 +32,7 @@ type Channel struct {
 }
 
 func (c *Channel) Dial() (err error) {
-	raw, err := net.DialTimeout(SchemaTCP, c.RemoteAddr, time.Second*15)
+	raw, err := net.DialTimeout(SchemeTCP, c.RemoteAddr, time.Second*15)
 	if err != nil {
 		return
 	}
@@ -58,14 +57,20 @@ func (c *Channel) Connect() (err error) {
 }
 
 func (c *Channel) loopRead() {
+	var err error
 	log.Info("[Channel] channel(%v) start reading", c.RemoteAddr)
 	defer func() {
-		log.Info("[Channel] channel(%v) stop reading", c.RemoteAddr)
+		if err != nil {
+			log.Error("[Channel] channel(%v) stop reading for err: %v", c.RemoteAddr, err)
+		} else {
+			log.Info("[Channel] channel(%v) stop reading", c.RemoteAddr)
+		}
 	}()
 
 	for {
-		msg, err := c.ReadMessage()
-		if err == io.EOF {
+		var msg *Message
+		msg, err = c.ReadMessage()
+		if err != nil {
 			return
 		}
 

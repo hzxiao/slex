@@ -11,6 +11,7 @@ type Conn interface {
 	ReadFull(buf []byte) (int, error)
 	WriteMessage(msg *Message) (int, error)
 	Write(data []byte) (int, error)
+	Read(buf []byte) (int, error)
 	Close() error
 }
 
@@ -69,6 +70,10 @@ func (c *conn) WriteMessage(msg *Message) (int, error) {
 
 func (c *conn) Write(data []byte) (int, error) {
 	return c.Raw.Write(data)
+}
+
+func (c *conn) Read(buf []byte) (int, error) {
+	return c.Raw.Read(buf)
 }
 
 func (c *conn) Close() error {
