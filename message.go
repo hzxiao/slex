@@ -3,6 +3,8 @@ package slex
 const (
 	CmdChannelConnect     = 0x01
 	CmdChannelConnectResp = 0x02
+	CmdForwardDial        = 0x03
+	CmdForwardDialResp    = 0x04
 )
 
 type Message struct {

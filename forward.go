@@ -2,6 +2,7 @@ package slex
 
 import (
 	"fmt"
+	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
 	"net"
 	"net/url"
@@ -56,28 +57,36 @@ func (r *route) isEndNode() bool {
 	return r.position == len(r.nodes)
 }
 
+func (r *route) nextNode() string {
+	return r.nodes[r.position+1]
+}
+
 type Forward struct {
 	Conn
 
+	ID        string
 	localAddr string
-	listener net.Listener
+	listener  net.Listener
 
 	routeInfo *route
+	DstID     string
 
-	channel *Channel
+	s *Slex
 }
 
-func NewForward(localAddr, rawRoute string, position int) (*Forward, error) {
+func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, error) {
 	routeInfo, err := parseRoute(rawRoute, position)
 	if err != nil {
 		return nil, err
 	}
 
 	f := &Forward{
-		localAddr:localAddr,
-		routeInfo:routeInfo,
+		ID:        RandString(8),
+		localAddr: localAddr,
+		routeInfo: routeInfo,
+		s:         s,
 	}
-	
+
 	if f.routeInfo.isStartNode() {
 		err = f.listenAndAccept()
 		if err != nil {
@@ -130,7 +139,17 @@ func (f *Forward) Dial() error {
 	if f.routeInfo.isEndNode() {
 
 	} else {
+		channelName := f.routeInfo.nextNode()
+		channel, ok := f.s.GetChannel(channelName)
+		if !ok || channel == nil {
+			return fmt.Errorf("chanel(%v) not found", channelName)
+		}
 
+		writeJson(channel, CmdForwardDial, goutil.Map{
+			"route": f.routeInfo.raw,
+			"position": f.routeInfo.position,
+			"fid": f.ID,
+		})
 	}
 	return nil
 }

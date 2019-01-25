@@ -27,8 +27,6 @@ type Channel struct {
 
 	Initiator bool //是否建立通道发起者
 	State     uint32
-
-	Forwards []*Forward
 }
 
 func (c *Channel) Dial() (err error) {
@@ -94,10 +92,34 @@ func (c *Channel) Handle(msg *Message) error {
 		if data.GetString("result") == "success" {
 			log.Info("[Channel] channel connect to server(%v) success", c.RemoteAddr)
 			atomic.StoreUint32(&c.State, ChanStateConnected)
+			c.Name = data.GetString("name")
+
+			err = c.s.MoveConnectedChannel(c)
+			if err != nil {
+				log.Error("[Channel] move connected channel(%v) err: %v", c.Name, err)
+				c.Close()
+			}
 		} else {
-			log.Error("[Channel] channal connect to server(%v) fail: %v", c.RemoteAddr, data.GetString("message"))
+			log.Error("[Channel] channel connect to server(%v) fail: %v", c.RemoteAddr, data.GetString("message"))
 			c.Close()
 		}
+	case CmdForwardDial:
+		if !c.s.IsServer {
+			return fmt.Errorf("not allow to dial throught slex client mode node")
+		}
+		data, err := jsonDecode(msg.Body)
+		if err != nil {
+			return err
+		}
+
+		forward, err := NewForward(c.s, "", data.GetString("route"), int(data.GetInt64("position")+1))
+		if err != nil {
+			return err
+		}
+
+		_ = forward
+	case CmdForwardDialResp:
+
 	default:
 		c.Close()
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)

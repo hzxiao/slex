@@ -19,7 +19,8 @@ type Slex struct {
 	Config   *conf.Config
 	IsServer bool
 
-	Channels map[string]*Channel
+	ConnectingChannels []*Channel
+	Channels           map[string]*Channel
 
 	lock sync.Mutex
 }
@@ -43,7 +44,6 @@ func (s *Slex) EstablishChannels() (err error) {
 			Enable:     chanOpt.Enable,
 			Token:      chanOpt.Token,
 			RemoteAddr: chanOpt.RemoteAddr,
-			Name:       chanOpt.RemoteAddr,
 			s:          s,
 			Initiator:  true,
 			State:      ChanStateUnconnected,
@@ -52,17 +52,16 @@ func (s *Slex) EstablishChannels() (err error) {
 		if channel.Enable && channel.RemoteAddr != "" {
 			err = channel.Connect()
 			if err != nil {
-				log.Error("[Slex] establish channel(%v) err: %v", channel.RemoteAddr)
+				log.Error("[Slex] establish channel(%v) err: %v", channel.RemoteAddr, err)
 				continue
 			}
 			go channel.loopRead()
 			log.Info("[Slex] try to establish channel(%v)...", channel.RemoteAddr)
 		}
 
-		err = s.AddChannel(channel)
-		if err != nil {
-			log.Error("[Slex] establish and add to channel(%v) slex err: %v", channel.RemoteAddr, err)
-		}
+		s.lock.Lock()
+		s.ConnectingChannels = append(s.ConnectingChannels, channel)
+		s.lock.Unlock()
 	}
 	return nil
 }
@@ -142,11 +141,6 @@ func (s *Slex) handle(raw net.Conn) {
 		return
 	}
 
-	writeJson(conn, CmdChannelConnectResp, goutil.Map{
-		"result": "success",
-	})
-	log.Info("[Slex] auth success and add a new channel(%v), addr(%v)", data.GetString("name"), raw.RemoteAddr())
-
 	//add a new channel
 	channel := &Channel{
 		Conn:       conn,
@@ -166,6 +160,12 @@ func (s *Slex) handle(raw net.Conn) {
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
 	}
+	writeJson(conn, CmdChannelConnectResp, goutil.Map{
+		"result": "success",
+		"name":   s.Config.Name,
+	})
+	log.Info("[Slex] auth success and add a new channel(%v), addr(%v)", data.GetString("name"), raw.RemoteAddr())
+
 	go channel.loopRead()
 }
 
@@ -194,4 +194,34 @@ func (s *Slex) AddChannel(channel *Channel) error {
 
 	s.Channels[channel.Name] = channel
 	return nil
+}
+
+func (s *Slex) MoveConnectedChannel(channel *Channel) error {
+	s.lock.Lock()
+	var i int
+	for i = 0; i < len(s.ConnectingChannels); i++ {
+		if s.ConnectingChannels[i] == channel {
+			break
+		}
+	}
+	if i >= len(s.ConnectingChannels) {
+		return fmt.Errorf("channel not found")
+	}
+	//delete channel from connecting channels slice
+	if i == len(s.ConnectingChannels)-1 {
+		s.ConnectingChannels = s.ConnectingChannels[:i]
+	} else {
+		s.ConnectingChannels = append(s.ConnectingChannels[:i], s.ConnectingChannels[i+1:]...)
+	}
+	s.lock.Unlock()
+
+	return s.AddChannel(channel)
+}
+
+func(s *Slex) GetChannel(name string) (*Channel, bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	c, ok := s.Channels[name]
+	return c, ok
 }

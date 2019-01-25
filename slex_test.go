@@ -109,14 +109,15 @@ func TestSlex_EstablishChannels(t *testing.T) {
 	err := client.EstablishChannels()
 	assert.NoError(t, err)
 
-	time.Sleep(1 * time.Second)
-
-	cliChannel := client.Channels[listen]
+	cliChannel := client.ConnectingChannels[0]
 	assert.NotNil(t, cliChannel)
+
+	time.Sleep(1 * time.Second)
 	assert.Equal(t, ChanStateConnected, cliChannel.State)
 
 	_, ok := server.Channels["cli"]
 	assert.True(t, ok)
+	assert.Equal(t, 0, len(client.ConnectingChannels))
 
 	//dup name fail
 	client2 := &Slex{
@@ -139,7 +140,7 @@ func TestSlex_EstablishChannels(t *testing.T) {
 
 	err = client2.EstablishChannels()
 	assert.NoError(t, err)
-	assert.NotEqual(t, ChanStateConnected, client2.Channels[listen].State)
+	assert.NotEqual(t, ChanStateConnected, client2.ConnectingChannels[0].State)
 
 	//access fail
 	client3 := &Slex{
@@ -164,9 +165,9 @@ func TestSlex_EstablishChannels(t *testing.T) {
 	assert.NoError(t, err)
 
 	time.Sleep(1 * time.Second)
-	cliChannel3 := client3.Channels[listen]
+	cliChannel3 := client3.ConnectingChannels[0]
 	assert.True(t, checkConnClosed(cliChannel3.Conn))
-	assert.NotEqual(t, ChanStateConnected, client3.Channels[listen].State)
+	assert.NotEqual(t, ChanStateConnected, client3.ConnectingChannels[0].State)
 
 }
 
