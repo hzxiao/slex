@@ -23,7 +23,7 @@ channels:
   -
     enable: true
     token: 123456
-    remoteAddr: 192.168.2.30:2303
+    remote: 192.168.2.30:2303
 forwards:
   -
     local: :8900
@@ -49,7 +49,7 @@ channels:
   -
     enable: true
     token: 123456
-    remoteAddr: 192.168.2.30:2303
+    remote: 192.168.2.30:2303
 forwards:
   -
     local: :8900

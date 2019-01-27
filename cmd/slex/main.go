@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/hzxiao/slex"
+	"github.com/hzxiao/slex/conf"
 	flag "github.com/spf13/pflag"
 	"os"
 	"os/signal"
@@ -38,6 +40,20 @@ func main() {
 		fmt.Println("lack of flag, you should run as server mode or client mode")
 		fmt.Println()
 		printUsage()
+		exit(1)
+	}
+
+	cfg, err := conf.ParseConfig(*cfgName)
+	if err != nil {
+		fmt.Println(err)
+		exit(1)
+	}
+
+	fmt.Println(cfg.Forwards)
+	s := slex.NewSlex(cfg, *srv)
+	err = s.Start()
+	if err != nil {
+		fmt.Println(err)
 		exit(1)
 	}
 

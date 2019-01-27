@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
@@ -54,11 +55,15 @@ func (r *route) isStartNode() bool {
 }
 
 func (r *route) isEndNode() bool {
-	return r.position == len(r.nodes)
+	return r.position+1 == len(r.nodes)
 }
 
 func (r *route) nextNode() string {
 	return r.nodes[r.position+1]
+}
+
+func (r *route) prevNode() string {
+	return r.nodes[r.position-1]
 }
 
 type Forward struct {
@@ -69,9 +74,11 @@ type Forward struct {
 	listener  net.Listener
 
 	routeInfo *route
+	SrcID     string
 	DstID     string
 
-	s *Slex
+	ready chan bool
+	s     *Slex
 }
 
 func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, error) {
@@ -85,6 +92,7 @@ func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, er
 		localAddr: localAddr,
 		routeInfo: routeInfo,
 		s:         s,
+		ready:     make(chan bool),
 	}
 
 	if f.routeInfo.isStartNode() {
@@ -93,7 +101,7 @@ func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, er
 			return nil, err
 		}
 	}
-	return nil, nil
+	return f, nil
 }
 
 func (f *Forward) listenAndAccept() (err error) {
@@ -109,7 +117,8 @@ func (f *Forward) listenAndAccept() (err error) {
 		return
 	}
 
-	var handle = func(c net.Conn) {
+	log.Info("[Forward] listen local port at: %v", f.localAddr)
+	var srcHandle = func(c net.Conn) {
 		f.Conn = newConn(c)
 
 		err = f.Dial()
@@ -119,7 +128,40 @@ func (f *Forward) listenAndAccept() (err error) {
 			f.Close()
 			return
 		}
+
+		go func() {
+			<-f.ready
+
+			log.Info("[Forward] start to read src(%v, %v)...", f.localAddr, f.ID)
+			buf := make([]byte, 4096)
+			for {
+				var n int
+				n, err = f.Read(buf)
+				if err != nil {
+					log.Error("[Forward] read src(%v, %v) err: %v", f.localAddr, f.ID, err)
+					break
+				}
+
+				channelName := f.routeInfo.nextNode()
+				channel, ok := f.s.GetChannel(channelName)
+				if !ok || channel == nil {
+					log.Error("[Forward] find channel(%v) to write data forward but not found: %v", channelName)
+					//TODO: close and notify
+					continue
+				}
+
+				writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
+					"result":   "success",
+					"route":    f.routeInfo.raw,
+					"position": f.routeInfo.position,
+					"fid":      f.DstID,
+				}, buf[:n])
+			}
+
+			log.Info("[Forward] stop reading src(%v, %v)", f.localAddr, f.ID)
+		}()
 	}
+
 	go func() {
 		for {
 			c, err := f.listener.Accept()
@@ -129,28 +171,92 @@ func (f *Forward) listenAndAccept() (err error) {
 				}
 				continue
 			}
-			go handle(c)
+			go srcHandle(c)
 		}
 	}()
 	return nil
 }
 
-func (f *Forward) Dial() error {
+func (f *Forward) Dial() (err error) {
+	var channelName, fid, dstID string
+	var cmd byte
 	if f.routeInfo.isEndNode() {
-
+		err = f.DialDst()
+		if err != nil {
+			return err
+		}
+		channelName = f.routeInfo.prevNode()
+		fid = f.ID
+		dstID = f.SrcID
+		cmd = CmdForwardDialResp
 	} else {
-		channelName := f.routeInfo.nextNode()
-		channel, ok := f.s.GetChannel(channelName)
-		if !ok || channel == nil {
-			return fmt.Errorf("chanel(%v) not found", channelName)
+		channelName = f.routeInfo.nextNode()
+		fid = f.SrcID
+		cmd = CmdForwardDial
+	}
+
+	channel, ok := f.s.GetChannel(channelName)
+	if !ok || channel == nil {
+		return fmt.Errorf("chanel(%v) not found", channelName)
+	}
+
+	writeJson(channel, cmd, goutil.Map{
+		"result":   "success",
+		"route":    f.routeInfo.raw,
+		"position": f.routeInfo.position,
+		"fid":      fid,
+		"dstID":    dstID,
+	})
+
+	//add to slex
+	if f.routeInfo.isEndNode() {
+		f.DstID = dstID
+		f.SrcID = f.ID
+		err = f.s.AddForward(f)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *Forward) DialDst() (err error) {
+	c, err := net.DialTimeout(f.routeInfo.scheme, f.routeInfo.destination, time.Second*15)
+	if err != nil {
+		return err
+	}
+
+	f.Conn = newConn(c)
+	log.Info("[Forward] start to read from dst(%v)...", f.routeInfo.destination)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			var n int
+			n, err = f.Read(buf)
+			if err != nil {
+				log.Error("[Forward] read dst(%v) err: %v", f.routeInfo.destination, err)
+				break
+			}
+
+			channelName := f.routeInfo.prevNode()
+			channel, ok := f.s.GetChannel(channelName)
+			if !ok || channel == nil {
+				log.Error("[Forward] find channel(%v) to write data back but not found: %v", channelName)
+				//TODO: close and notify
+				continue
+			}
+
+			writeJsonAndBytes(channel, CmdDataBackwards, goutil.Map{
+				"result":   "success",
+				"route":    f.routeInfo.raw,
+				"position": f.routeInfo.position,
+				"fid":      f.DstID,
+			}, buf[:n])
 		}
 
-		writeJson(channel, CmdForwardDial, goutil.Map{
-			"route": f.routeInfo.raw,
-			"position": f.routeInfo.position,
-			"fid": f.ID,
-		})
-	}
+		log.Info("[Forward] stop reading dst(%v)", f.routeInfo.destination)
+	}()
+
 	return nil
 }
 

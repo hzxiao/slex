@@ -117,9 +117,101 @@ func (c *Channel) Handle(msg *Message) error {
 			return err
 		}
 
-		_ = forward
-	case CmdForwardDialResp:
+		forward.SrcID = data.GetString("fid")
+		//dial
+		err = forward.Dial()
+		if err != nil {
+			return fmt.Errorf("forward dial route(%v), position(%v) fail: %v", forward.routeInfo.raw, forward.routeInfo.position, err)
+		}
 
+	case CmdForwardDialResp:
+		data, err := jsonDecode(msg.Body)
+		if err != nil {
+			return err
+		}
+
+		routeInfo, err := parseRoute(data.GetString("route"), int(data.GetInt64("position")-1))
+		if err != nil {
+			return err
+		}
+
+		if routeInfo.isStartNode() {
+			//find forward by id
+			fid := data.GetString("dstID")
+			forward, ok := c.s.GetForward(fid)
+			if !ok {
+				return fmt.Errorf("write forward dial resp to forward(%v), but not found", fid)
+			}
+
+			forward.DstID = data.GetString("fid")
+			forward.ready <- true
+		} else {
+			channelName := routeInfo.prevNode()
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("write forward dial resp to channel(%v), but not found", channelName)
+			}
+
+			data.Set("position", routeInfo.position)
+			writeJson(channel, msg.Cmd, data)
+		}
+
+	case CmdDataForward:
+		info, data, err := decodeJsonAndBytes(msg.Body)
+		if err != nil {
+			return err
+		}
+
+		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")+1))
+		if err != nil {
+			return err
+		}
+
+		if routeInfo.isEndNode() {
+			fid := info.GetString("fid")
+			forward, ok := c.s.GetForward(fid)
+			if !ok {
+				return fmt.Errorf("write forward data to forward(%v), but not found", fid)
+			}
+			forward.Write(data)
+		} else {
+			channelName := routeInfo.nextNode()
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("write forward data to channel(%v), but not found", channelName)
+			}
+
+			info.Set("position", routeInfo.position)
+			writeJsonAndBytes(channel, msg.Cmd, info, data)
+		}
+	case CmdDataBackwards:
+		info, data, err := decodeJsonAndBytes(msg.Body)
+		if err != nil {
+			return err
+		}
+
+		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")-1))
+		if err != nil {
+			return err
+		}
+
+		if routeInfo.isStartNode() {
+			fid := info.GetString("fid")
+			forward, ok := c.s.GetForward(fid)
+			if !ok {
+				return fmt.Errorf("write backwards data to forward(%v), but not found", fid)
+			}
+			forward.Write(data)
+		} else {
+			channelName := routeInfo.prevNode()
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("write backwards data to channel(%v), but not found", channelName)
+			}
+
+			info.Set("position", routeInfo.position)
+			writeJsonAndBytes(channel, msg.Cmd, info, data)
+		}
 	default:
 		c.Close()
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)

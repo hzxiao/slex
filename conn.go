@@ -87,3 +87,39 @@ func writeJson(conn Conn, cmd byte, data goutil.Map) (int, error) {
 		Body: body,
 	})
 }
+
+func writeJsonAndBytes(conn Conn, cmd byte, info goutil.Map, data []byte) (int, error) {
+	infoBytes, _ := jsonEncode(info)
+	var body []byte
+	body = append(body, uint32ToBytes(uint32(len(infoBytes)))...)
+	body = append(body, infoBytes...)
+	body = append(body, data...)
+
+	return conn.WriteMessage(&Message{
+		Cmd:  cmd,
+		Body: body,
+	})
+}
+
+func decodeJsonAndBytes(buf []byte) (goutil.Map, []byte, error) {
+	if len(buf) < 4 {
+		return nil, buf, fmt.Errorf("buf len must larger then 4")
+	}
+
+	infoLen := int(bytesToUint32(buf[:4]))
+	if len(buf) < infoLen+4 {
+		return nil, buf, fmt.Errorf("buf len must equal with or larger then %v", infoLen+4)
+	}
+
+	info, err := jsonDecode(buf[4 : 4+infoLen])
+	if err != nil {
+		return nil, buf, err
+	}
+
+	var left []byte
+	if len(buf) > 4+infoLen {
+		left = buf[4+infoLen:]
+	}
+
+	return info, left, err
+}

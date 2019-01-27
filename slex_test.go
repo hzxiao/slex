@@ -92,14 +92,14 @@ func TestSlex_EstablishChannels(t *testing.T) {
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
-				Enable     bool
-				Token      string
-				RemoteAddr string
+				Enable bool
+				Token  string
+				Remote string
 			}{
 				{
-					Enable:     true,
-					Token:      "token",
-					RemoteAddr: listen,
+					Enable: true,
+					Token:  "token",
+					Remote: listen,
 				},
 			},
 		},
@@ -124,14 +124,14 @@ func TestSlex_EstablishChannels(t *testing.T) {
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
-				Enable     bool
-				Token      string
-				RemoteAddr string
+				Enable bool
+				Token  string
+				Remote string
 			}{
 				{
-					Enable:     true,
-					Token:      "token",
-					RemoteAddr: listen,
+					Enable: true,
+					Token:  "token",
+					Remote: listen,
 				},
 			},
 		},
@@ -147,14 +147,14 @@ func TestSlex_EstablishChannels(t *testing.T) {
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
-				Enable     bool
-				Token      string
-				RemoteAddr string
+				Enable bool
+				Token  string
+				Remote string
 			}{
 				{
-					Enable:     true,
-					Token:      "wrong token",
-					RemoteAddr: listen,
+					Enable: true,
+					Token:  "wrong token",
+					Remote: listen,
 				},
 			},
 		},

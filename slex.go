@@ -22,7 +22,18 @@ type Slex struct {
 	ConnectingChannels []*Channel
 	Channels           map[string]*Channel
 
+	Forwards map[string]*Forward
+
 	lock sync.Mutex
+}
+
+func NewSlex(config *conf.Config, isServer bool) *Slex {
+	return &Slex{
+		Config:   config,
+		IsServer: isServer,
+		Channels: make(map[string]*Channel),
+		Forwards: make(map[string]*Forward),
+	}
 }
 
 func (s *Slex) Start() (err error) {
@@ -35,15 +46,22 @@ func (s *Slex) Start() (err error) {
 	}
 
 	s.EstablishChannels()
+	err = s.InitForwards()
+	if err != nil {
+		return fmt.Errorf("init forwards err: %v", err)
+	}
 	return nil
 }
 
 func (s *Slex) EstablishChannels() (err error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	for _, chanOpt := range s.Config.Channels {
 		channel := &Channel{
 			Enable:     chanOpt.Enable,
 			Token:      chanOpt.Token,
-			RemoteAddr: chanOpt.RemoteAddr,
+			RemoteAddr: chanOpt.Remote,
 			s:          s,
 			Initiator:  true,
 			State:      ChanStateUnconnected,
@@ -59,9 +77,23 @@ func (s *Slex) EstablishChannels() (err error) {
 			log.Info("[Slex] try to establish channel(%v)...", channel.RemoteAddr)
 		}
 
-		s.lock.Lock()
 		s.ConnectingChannels = append(s.ConnectingChannels, channel)
-		s.lock.Unlock()
+	}
+	return nil
+}
+
+func (s *Slex) InitForwards() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	for _, forwardOpt := range s.Config.Forwards {
+		forward, err := NewForward(s, forwardOpt.Local, forwardOpt.Route, 0)
+		if err != nil {
+			return err
+		}
+
+		forward.SrcID = forward.ID
+		s.Forwards[forward.ID] = forward
 	}
 	return nil
 }
@@ -100,6 +132,7 @@ func (s *Slex) handle(raw net.Conn) {
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": "Wrong first cmd",
+			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
@@ -124,6 +157,7 @@ func (s *Slex) handle(raw net.Conn) {
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": err.Error(),
+			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
@@ -135,6 +169,7 @@ func (s *Slex) handle(raw net.Conn) {
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": "No Permission",
+			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
@@ -156,10 +191,12 @@ func (s *Slex) handle(raw net.Conn) {
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": err.Error(),
+			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
 	}
+
 	writeJson(conn, CmdChannelConnectResp, goutil.Map{
 		"result": "success",
 		"name":   s.Config.Name,
@@ -218,10 +255,31 @@ func (s *Slex) MoveConnectedChannel(channel *Channel) error {
 	return s.AddChannel(channel)
 }
 
-func(s *Slex) GetChannel(name string) (*Channel, bool) {
+func (s *Slex) GetChannel(name string) (*Channel, bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	c, ok := s.Channels[name]
 	return c, ok
+}
+
+func (s *Slex) AddForward(f *Forward) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	_, found := s.Forwards[f.ID]
+	if found {
+		return fmt.Errorf("forward is exists")
+	}
+
+	s.Forwards[f.ID] = f
+	return nil
+}
+
+func (s *Slex) GetForward(fid string) (*Forward, bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	f, ok := s.Forwards[fid]
+	return f, ok
 }

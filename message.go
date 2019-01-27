@@ -5,6 +5,8 @@ const (
 	CmdChannelConnectResp = 0x02
 	CmdForwardDial        = 0x03
 	CmdForwardDialResp    = 0x04
+	CmdDataForward        = 0x05
+	CmdDataBackwards      = 0x06
 )
 
 type Message struct {
