@@ -1,7 +1,6 @@
 package slex
 
 import (
-	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/assert"
 	"testing"
 )
@@ -27,18 +26,4 @@ func TestUint32ToBytes(t *testing.T) {
 
 	i3 := bytesToUint32(b3)
 	assert.Equal(t, uint32(256), i3)
-}
-
-func TestBytesInMap(t *testing.T) {
-	m := goutil.Map{
-		"bytes": []byte("bytes"),
-	}
-
-	buf, err := jsonEncode(m)
-	assert.NoError(t, err)
-
-	encodeMap, err := jsonDecode(buf)
-	assert.NoError(t, err)
-
-	assert.Equal(t, []byte("bytes"), []byte(encodeMap.GetString("bytes")))
 }

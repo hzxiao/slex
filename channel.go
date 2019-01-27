@@ -101,6 +101,9 @@ func (c *Channel) Handle(msg *Message) error {
 			}
 		} else {
 			log.Error("[Channel] channel connect to server(%v) fail: %v", c.RemoteAddr, data.GetString("message"))
+			if data.GetBool("forbid") {
+				atomic.StoreUint32(&c.State, ChanStateFoNoPerm)
+			}
 			c.Close()
 		}
 	case CmdForwardDial:
