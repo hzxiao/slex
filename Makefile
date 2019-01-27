@@ -7,6 +7,7 @@ fmt:
 	gofmt -w .
 
 test:
+	go get ./...
 	go test --cover ./...
 
 build:
