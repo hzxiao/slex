@@ -92,11 +92,13 @@ func TestSlex_EstablishChannels(t *testing.T) {
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
+				Name   string
 				Enable bool
 				Token  string
 				Remote string
 			}{
 				{
+					Name:   server.Config.Name,
 					Enable: true,
 					Token:  "token",
 					Remote: listen,
@@ -109,7 +111,7 @@ func TestSlex_EstablishChannels(t *testing.T) {
 	err := client.EstablishChannels()
 	assert.NoError(t, err)
 
-	cliChannel := client.ConnectingChannels[0]
+	cliChannel, _ := client.GetChannel("srv")
 	assert.NotNil(t, cliChannel)
 
 	time.Sleep(1 * time.Second)
@@ -117,18 +119,19 @@ func TestSlex_EstablishChannels(t *testing.T) {
 
 	_, ok := server.Channels["cli"]
 	assert.True(t, ok)
-	assert.Equal(t, 0, len(client.ConnectingChannels))
 
 	//dup name fail
 	client2 := &Slex{
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
+				Name   string
 				Enable bool
 				Token  string
 				Remote string
 			}{
 				{
+					Name:   server.Config.Name,
 					Enable: true,
 					Token:  "token",
 					Remote: listen,
@@ -140,18 +143,22 @@ func TestSlex_EstablishChannels(t *testing.T) {
 
 	err = client2.EstablishChannels()
 	assert.NoError(t, err)
-	assert.NotEqual(t, ChanStateConnected, client2.ConnectingChannels[0].State)
+	cliChannel2, _ := client2.GetChannel("srv")
+
+	assert.NotEqual(t, ChanStateFoNoPerm, cliChannel2.State)
 
 	//access fail
 	client3 := &Slex{
 		Config: &conf.Config{
 			Name: "cli",
 			Channels: []struct {
+				Name   string
 				Enable bool
 				Token  string
 				Remote string
 			}{
 				{
+					Name:   server.Config.Name,
 					Enable: true,
 					Token:  "wrong token",
 					Remote: listen,
@@ -165,9 +172,10 @@ func TestSlex_EstablishChannels(t *testing.T) {
 	assert.NoError(t, err)
 
 	time.Sleep(1 * time.Second)
-	cliChannel3 := client3.ConnectingChannels[0]
+	cliChannel3, _ := client3.GetChannel("srv")
 	assert.True(t, checkConnClosed(cliChannel3.Conn))
-	assert.NotEqual(t, ChanStateConnected, client3.ConnectingChannels[0].State)
+
+	assert.NotEqual(t, ChanStateFoNoPerm, cliChannel3.State)
 
 }
 

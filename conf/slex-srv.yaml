@@ -1,0 +1,8 @@
+name: Server
+
+listen: :2303
+
+access:
+-
+  name: Client
+  token: 123456

@@ -1,0 +1,15 @@
+name: Client
+
+listen: :2303
+
+access:
+-
+  name: Client
+  token: 123456
+
+channels:
+-
+  name: Server
+  enable: true
+  token: 123456
+  remote: localhost:2303

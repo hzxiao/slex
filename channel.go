@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
+	"io"
 	"net"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,8 @@ const (
 	ChanStateFoNoPerm //no permission to connect server
 )
 
+const reconnectDur = time.Second * 5
+
 type Channel struct {
 	Conn
 
@@ -27,6 +30,7 @@ type Channel struct {
 
 	Initiator bool //是否建立通道发起者
 	State     uint32
+	reconnect uint32 //1: need to reconnect to the server
 }
 
 func (c *Channel) Dial() (err error) {
@@ -41,42 +45,97 @@ func (c *Channel) Dial() (err error) {
 func (c *Channel) Connect() (err error) {
 	err = c.Dial()
 	if err != nil {
+		atomic.StoreUint32(&c.reconnect, 1)
 		return err
 	}
-	body, _ := jsonEncode(goutil.Map{
-		"name":  c.s.Config.Name,
-		"token": c.Token,
-	})
-	_, err = c.WriteMessage(&Message{
-		Cmd:  CmdChannelConnect,
-		Body: body,
-	})
+
+	//send auth message
+	body, _ := jsonEncode(goutil.Map{"name": c.s.Config.Name, "token": c.Token})
+	_, err = c.WriteMessage(&Message{Cmd: CmdChannelConnect, Body: body})
+	if err != nil {
+		atomic.StoreUint32(&c.reconnect, 1)
+		return err
+	}
+
+	//read response
+	msg, err := c.ReadMessage()
+	if err != nil {
+		atomic.StoreUint32(&c.reconnect, 1)
+		return err
+	}
+	if msg == nil || msg.Cmd != CmdChannelConnectResp {
+		return fmt.Errorf("read invalid message")
+	}
+
+	data, err := jsonDecode(msg.Body)
+	if err != nil {
+		return err
+	}
+	if data.GetString("result") == "success" {
+		c.Name = data.GetString("name")
+		atomic.StoreUint32(&c.State, ChanStateConnected)
+		log.Info("[Channel] channel connect to server(%v, %v) success",c.Name, c.RemoteAddr)
+	} else {
+		err = fmt.Errorf(data.GetString("message"))
+		log.Error("[Channel] channel connect to server(%v) fail: %v", c.RemoteAddr, err)
+		if data.GetBool("forbid") {
+			atomic.StoreUint32(&c.State, ChanStateFoNoPerm)
+		} else {
+			atomic.StoreUint32(&c.reconnect, 1)
+		}
+		c.Close()
+	}
+
+	if err == nil {
+		go c.loopRead()
+	}
 	return err
+}
+
+func (c *Channel) Reconnect() {
+	ticker := time.NewTicker(reconnectDur)
+	defer ticker.Stop()
+
+	for atomic.LoadUint32(&c.reconnect) == 1 {
+		log.Info("[Channel] try to reconnect server(%v)...", c.RemoteAddr)
+		err := c.Connect()
+		if err == nil {
+			atomic.StoreUint32(&c.reconnect, 0)
+			break
+		} else {
+			log.Error("[Channel] channel reconnect server(%v) err: %v", c.RemoteAddr, err)
+		}
+		<-ticker.C
+	}
 }
 
 func (c *Channel) loopRead() {
 	var err error
-	log.Info("[Channel] channel(%v) start reading", c.RemoteAddr)
-	defer func() {
-		if err != nil {
-			log.Error("[Channel] channel(%v) stop reading for err: %v", c.RemoteAddr, err)
-		} else {
-			log.Info("[Channel] channel(%v) stop reading", c.RemoteAddr)
-		}
-	}()
+	log.Info("[Channel] channel(%v, %v) start reading", c.Name, c.RemoteAddr)
 
 	for {
 		var msg *Message
 		msg, err = c.ReadMessage()
 		if err != nil {
-			return
+			break
 		}
 
 		err = c.Handle(msg)
 		if err != nil {
-			log.Error("[Channel] handle message on chaneel(%v) err: %v", c.RemoteAddr, err)
+			log.Error("[Channel] handle message on channel(%v) err: %v", c.RemoteAddr, err)
 		}
 	}
+
+	if err != nil {
+		log.Error("[Channel] channel(%v) stop reading for err: %v", c.RemoteAddr, err)
+	} else {
+		log.Info("[Channel] channel(%v) stop reading", c.RemoteAddr)
+	}
+	if c.Initiator && err == io.EOF {
+		atomic.StoreUint32(&c.reconnect, 1)
+	}
+
+	c.Close()
 }
 
 func (c *Channel) Handle(msg *Message) error {
@@ -84,28 +143,6 @@ func (c *Channel) Handle(msg *Message) error {
 		return fmt.Errorf("invalid message: null msg")
 	}
 	switch msg.Cmd {
-	case CmdChannelConnectResp:
-		data, err := jsonDecode(msg.Body)
-		if err != nil {
-			return err
-		}
-		if data.GetString("result") == "success" {
-			log.Info("[Channel] channel connect to server(%v) success", c.RemoteAddr)
-			atomic.StoreUint32(&c.State, ChanStateConnected)
-			c.Name = data.GetString("name")
-
-			err = c.s.MoveConnectedChannel(c)
-			if err != nil {
-				log.Error("[Channel] move connected channel(%v) err: %v", c.Name, err)
-				c.Close()
-			}
-		} else {
-			log.Error("[Channel] channel connect to server(%v) fail: %v", c.RemoteAddr, data.GetString("message"))
-			if data.GetBool("forbid") {
-				atomic.StoreUint32(&c.State, ChanStateFoNoPerm)
-			}
-			c.Close()
-		}
 	case CmdForwardDial:
 		if !c.s.IsServer {
 			return fmt.Errorf("not allow to dial throught slex client mode node")
@@ -216,12 +253,22 @@ func (c *Channel) Handle(msg *Message) error {
 			writeJsonAndBytes(channel, msg.Cmd, info, data)
 		}
 	default:
-		c.Close()
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}
 	return nil
 }
 
 func (c *Channel) Close() error {
-	return c.Conn.Close()
+	c.Conn.Close()
+
+	atomic.StoreUint32(&c.State, ChanStateClosed)
+	if atomic.LoadUint32(&c.reconnect) == 1 {
+		 c.Reconnect()
+		return nil
+	}
+
+	if !c.Initiator {
+		c.s.DeleteChannel(c.Name)
+	}
+	return nil
 }

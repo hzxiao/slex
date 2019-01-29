@@ -49,7 +49,6 @@ func main() {
 		exit(1)
 	}
 
-	fmt.Println(cfg.Forwards)
 	s := slex.NewSlex(cfg, *srv)
 	err = s.Start()
 	if err != nil {

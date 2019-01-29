@@ -19,9 +19,7 @@ type Slex struct {
 	Config   *conf.Config
 	IsServer bool
 
-	ConnectingChannels []*Channel
-	Channels           map[string]*Channel
-
+	Channels map[string]*Channel
 	Forwards map[string]*Forward
 
 	lock sync.Mutex
@@ -54,30 +52,31 @@ func (s *Slex) Start() (err error) {
 }
 
 func (s *Slex) EstablishChannels() (err error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	for _, chanOpt := range s.Config.Channels {
 		channel := &Channel{
 			Enable:     chanOpt.Enable,
 			Token:      chanOpt.Token,
+			Name:       chanOpt.Name,
 			RemoteAddr: chanOpt.Remote,
 			s:          s,
 			Initiator:  true,
 			State:      ChanStateUnconnected,
 		}
 
+		err = s.AddChannel(channel)
+		if err != nil {
+			log.Error("[Slex] add establishing channel(%v) err: %v", channel.RemoteAddr, err)
+			continue
+		}
 		if channel.Enable && channel.RemoteAddr != "" {
+			log.Info("[Slex] try to establish channel(%v)...", channel.RemoteAddr)
 			err = channel.Connect()
 			if err != nil {
 				log.Error("[Slex] establish channel(%v) err: %v", channel.RemoteAddr, err)
+				go channel.Reconnect()
 				continue
 			}
-			go channel.loopRead()
-			log.Info("[Slex] try to establish channel(%v)...", channel.RemoteAddr)
 		}
-
-		s.ConnectingChannels = append(s.ConnectingChannels, channel)
 	}
 	return nil
 }
@@ -233,34 +232,24 @@ func (s *Slex) AddChannel(channel *Channel) error {
 	return nil
 }
 
-func (s *Slex) MoveConnectedChannel(channel *Channel) error {
-	s.lock.Lock()
-	var i int
-	for i = 0; i < len(s.ConnectingChannels); i++ {
-		if s.ConnectingChannels[i] == channel {
-			break
-		}
-	}
-	if i >= len(s.ConnectingChannels) {
-		return fmt.Errorf("channel not found")
-	}
-	//delete channel from connecting channels slice
-	if i == len(s.ConnectingChannels)-1 {
-		s.ConnectingChannels = s.ConnectingChannels[:i]
-	} else {
-		s.ConnectingChannels = append(s.ConnectingChannels[:i], s.ConnectingChannels[i+1:]...)
-	}
-	s.lock.Unlock()
-
-	return s.AddChannel(channel)
-}
-
 func (s *Slex) GetChannel(name string) (*Channel, bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	c, ok := s.Channels[name]
 	return c, ok
+}
+
+func (s *Slex) DeleteChannel(name string) (ok bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	_, ok = s.Channels[name]
+	if ok {
+		delete(s.Channels, name)
+		log.Info("[Slex] delete channel(%v)", name)
+	}
+	return ok
 }
 
 func (s *Slex) AddForward(f *Forward) error {

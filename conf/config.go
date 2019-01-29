@@ -15,6 +15,7 @@ type Config struct {
 		Token string
 	}
 	Channels []struct {
+		Name   string
 		Enable bool
 		Token  string
 		Remote string
