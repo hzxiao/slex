@@ -12,6 +12,8 @@ import (
 
 const (
 	RouterSeparator = "->"
+	RouteToRight    = "-->"
+	RouteToLeft     = "<--"
 )
 
 type route struct {
@@ -151,10 +153,11 @@ func (f *Forward) listenAndAccept() (err error) {
 				}
 
 				writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
-					"result":   "success",
-					"route":    f.routeInfo.raw,
-					"position": f.routeInfo.position,
-					"fid":      f.DstID,
+					"result":    "success",
+					"route":     f.routeInfo.raw,
+					"position":  f.routeInfo.position,
+					"fid":       f.DstID,
+					"direction": RouteToRight,
 				}, buf[:n])
 			}
 
@@ -246,11 +249,12 @@ func (f *Forward) DialDst() (err error) {
 				continue
 			}
 
-			writeJsonAndBytes(channel, CmdDataBackwards, goutil.Map{
-				"result":   "success",
-				"route":    f.routeInfo.raw,
-				"position": f.routeInfo.position,
-				"fid":      f.DstID,
+			writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
+				"result":    "success",
+				"route":     f.routeInfo.raw,
+				"position":  f.routeInfo.position,
+				"fid":       f.DstID,
+				"direction": RouteToLeft,
 			}, buf[:n])
 		}
 

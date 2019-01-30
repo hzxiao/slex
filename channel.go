@@ -74,7 +74,7 @@ func (c *Channel) Connect() (err error) {
 	if data.GetString("result") == "success" {
 		c.Name = data.GetString("name")
 		atomic.StoreUint32(&c.State, ChanStateConnected)
-		log.Info("[Channel] channel connect to server(%v, %v) success",c.Name, c.RemoteAddr)
+		log.Info("[Channel] channel connect to server(%v, %v) success", c.Name, c.RemoteAddr)
 	} else {
 		err = fmt.Errorf(data.GetString("message"))
 		log.Error("[Channel] channel connect to server(%v) fail: %v", c.RemoteAddr, err)
@@ -201,13 +201,38 @@ func (c *Channel) Handle(msg *Message) error {
 		if err != nil {
 			return err
 		}
-
-		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")+1))
-		if err != nil {
-			return err
+		var position int
+		var routeInfo *route
+		var edge bool
+		var channelName string
+		switch info.GetString("direction") {
+		case RouteToRight:
+			position = int(info.GetInt64("position") + 1)
+			routeInfo, err = parseRoute(info.GetString("route"), position)
+			if err != nil {
+				return err
+			}
+			if routeInfo.isEndNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.nextNode()
+			}
+		case RouteToLeft:
+			position = int(info.GetInt64("position") - 1)
+			routeInfo, err = parseRoute(info.GetString("route"), position)
+			if err != nil {
+				return err
+			}
+			if routeInfo.isStartNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.prevNode()
+			}
+		default:
+			return fmt.Errorf("unknown direction")
 		}
 
-		if routeInfo.isEndNode() {
+		if edge {
 			fid := info.GetString("fid")
 			forward, ok := c.s.GetForward(fid)
 			if !ok {
@@ -215,38 +240,9 @@ func (c *Channel) Handle(msg *Message) error {
 			}
 			forward.Write(data)
 		} else {
-			channelName := routeInfo.nextNode()
 			channel, ok := c.s.GetChannel(channelName)
 			if !ok {
 				return fmt.Errorf("write forward data to channel(%v), but not found", channelName)
-			}
-
-			info.Set("position", routeInfo.position)
-			writeJsonAndBytes(channel, msg.Cmd, info, data)
-		}
-	case CmdDataBackwards:
-		info, data, err := decodeJsonAndBytes(msg.Body)
-		if err != nil {
-			return err
-		}
-
-		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")-1))
-		if err != nil {
-			return err
-		}
-
-		if routeInfo.isStartNode() {
-			fid := info.GetString("fid")
-			forward, ok := c.s.GetForward(fid)
-			if !ok {
-				return fmt.Errorf("write backwards data to forward(%v), but not found", fid)
-			}
-			forward.Write(data)
-		} else {
-			channelName := routeInfo.prevNode()
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("write backwards data to channel(%v), but not found", channelName)
 			}
 
 			info.Set("position", routeInfo.position)
@@ -263,7 +259,7 @@ func (c *Channel) Close() error {
 
 	atomic.StoreUint32(&c.State, ChanStateClosed)
 	if atomic.LoadUint32(&c.reconnect) == 1 {
-		 c.Reconnect()
+		c.Reconnect()
 		return nil
 	}
 
