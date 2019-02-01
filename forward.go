@@ -140,7 +140,6 @@ func (f *Forward) listenAndAccept() (err error) {
 				var n int
 				n, err = f.Read(buf)
 				if err != nil {
-					log.Error("[Forward] read src(%v, %v) err: %v", f.localAddr, f.ID, err)
 					break
 				}
 

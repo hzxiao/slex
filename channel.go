@@ -50,12 +50,7 @@ func (c *Channel) Connect() (err error) {
 	}
 
 	//send auth message
-	body, _ := jsonEncode(goutil.Map{"name": c.s.Config.Name, "token": c.Token})
-	_, err = c.WriteMessage(&Message{Cmd: CmdChannelConnect, Body: body})
-	if err != nil {
-		atomic.StoreUint32(&c.reconnect, 1)
-		return err
-	}
+	writeJson(c, CmdChannelConnect, goutil.Map{"name": c.s.Config.Name, "token": c.Token})
 
 	//read response
 	msg, err := c.ReadMessage()
@@ -67,7 +62,7 @@ func (c *Channel) Connect() (err error) {
 		return fmt.Errorf("read invalid message")
 	}
 
-	data, err := jsonDecode(msg.Body)
+	data, _, err := decodeJsonAndBytes(msg.Body)
 	if err != nil {
 		return err
 	}
@@ -142,22 +137,22 @@ func (c *Channel) Handle(msg *Message) error {
 	if msg == nil {
 		return fmt.Errorf("invalid message: null msg")
 	}
+	info, data, err := decodeJsonAndBytes(msg.Body)
+	if err != nil {
+		return err
+	}
 	switch msg.Cmd {
 	case CmdForwardDial:
 		if !c.s.IsServer {
 			return fmt.Errorf("not allow to dial throught slex client mode node")
 		}
-		data, err := jsonDecode(msg.Body)
+
+		forward, err := NewForward(c.s, "", info.GetString("route"), int(info.GetInt64("position")+1))
 		if err != nil {
 			return err
 		}
 
-		forward, err := NewForward(c.s, "", data.GetString("route"), int(data.GetInt64("position")+1))
-		if err != nil {
-			return err
-		}
-
-		forward.SrcID = data.GetString("fid")
+		forward.SrcID = info.GetString("fid")
 		//dial
 		err = forward.Dial()
 		if err != nil {
@@ -165,25 +160,20 @@ func (c *Channel) Handle(msg *Message) error {
 		}
 
 	case CmdForwardDialResp:
-		data, err := jsonDecode(msg.Body)
-		if err != nil {
-			return err
-		}
-
-		routeInfo, err := parseRoute(data.GetString("route"), int(data.GetInt64("position")-1))
+		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")-1))
 		if err != nil {
 			return err
 		}
 
 		if routeInfo.isStartNode() {
 			//find forward by id
-			fid := data.GetString("dstID")
+			fid := info.GetString("dstID")
 			forward, ok := c.s.GetForward(fid)
 			if !ok {
 				return fmt.Errorf("write forward dial resp to forward(%v), but not found", fid)
 			}
 
-			forward.DstID = data.GetString("fid")
+			forward.DstID = info.GetString("fid")
 			forward.ready <- true
 		} else {
 			channelName := routeInfo.prevNode()
@@ -192,19 +182,17 @@ func (c *Channel) Handle(msg *Message) error {
 				return fmt.Errorf("write forward dial resp to channel(%v), but not found", channelName)
 			}
 
-			data.Set("position", routeInfo.position)
-			writeJson(channel, msg.Cmd, data)
+			info.Set("position", routeInfo.position)
+			writeJson(channel, msg.Cmd, info)
 		}
 
 	case CmdDataForward:
-		info, data, err := decodeJsonAndBytes(msg.Body)
-		if err != nil {
-			return err
-		}
-		var position int
-		var routeInfo *route
-		var edge bool
-		var channelName string
+		var (
+			position    int
+			routeInfo   *route
+			edge        bool
+			channelName string
+		)
 		switch info.GetString("direction") {
 		case RouteToRight:
 			position = int(info.GetInt64("position") + 1)
@@ -248,9 +236,15 @@ func (c *Channel) Handle(msg *Message) error {
 			info.Set("position", routeInfo.position)
 			writeJsonAndBytes(channel, msg.Cmd, info, data)
 		}
+	case CmdErrNotify:
+
 	default:
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}
+	return nil
+}
+
+func (c *Channel) Notify(r *route) error {
 	return nil
 }
 

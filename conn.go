@@ -81,11 +81,7 @@ func (c *conn) Close() error {
 }
 
 func writeJson(conn Conn, cmd byte, data goutil.Map) (int, error) {
-	body, _ := jsonEncode(data)
-	return conn.WriteMessage(&Message{
-		Cmd:  cmd,
-		Body: body,
-	})
+	return writeJsonAndBytes(conn, cmd, data, nil)
 }
 
 func writeJsonAndBytes(conn Conn, cmd byte, info goutil.Map, data []byte) (int, error) {

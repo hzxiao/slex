@@ -138,12 +138,13 @@ func (s *Slex) handle(raw net.Conn) {
 		return
 	}
 
-	data, err := jsonDecode(firstMsg.Body)
+	data, _, err := decodeJsonAndBytes(firstMsg.Body)
 	if err != nil {
 		log.Error("[Slex] decode json data(%v) from raw（%v) err: %v", firstMsg.Body, raw.RemoteAddr(), err)
 		writeJson(conn, CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": "Decode json error",
+			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
 		conn.Close()
