@@ -147,7 +147,7 @@ func (c *Channel) Handle(msg *Message) error {
 			return fmt.Errorf("not allow to dial throught slex client mode node")
 		}
 
-		forward, err := NewForward(c.s, "", info.GetString("route"), int(info.GetInt64("position")+1))
+		forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")+1))
 		if err != nil {
 			return err
 		}

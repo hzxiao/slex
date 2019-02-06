@@ -19,8 +19,9 @@ type Slex struct {
 	Config   *conf.Config
 	IsServer bool
 
-	Channels map[string]*Channel
-	Forwards map[string]*Forward
+	forwardCreators []*ForwardCreator
+	Channels        map[string]*Channel
+	Forwards        map[string]*Forward
 
 	lock sync.Mutex
 }
@@ -86,13 +87,15 @@ func (s *Slex) InitForwards() error {
 	defer s.lock.Unlock()
 
 	for _, forwardOpt := range s.Config.Forwards {
-		forward, err := NewForward(s, forwardOpt.Local, forwardOpt.Route, 0)
+		creator, err := NewForwardCreator(s, forwardOpt.Route, forwardOpt.Local)
 		if err != nil {
 			return err
 		}
-
-		forward.SrcID = forward.ID
-		s.Forwards[forward.ID] = forward
+		err = creator.listenAndAccept()
+		if err != nil {
+			return err
+		}
+		s.forwardCreators = append(s.forwardCreators, creator)
 	}
 	return nil
 }

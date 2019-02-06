@@ -71,19 +71,18 @@ func (r *route) prevNode() string {
 type Forward struct {
 	Conn
 
-	ID        string
-	localAddr string
-	listener  net.Listener
+	ID string
 
 	routeInfo *route
 	SrcID     string
 	DstID     string
 
-	ready chan bool
-	s     *Slex
+	ready   chan bool
+	errChan chan error
+	s       *Slex
 }
 
-func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, error) {
+func NewForward(s *Slex, rawRoute string, position int) (*Forward, error) {
 	routeInfo, err := parseRoute(rawRoute, position)
 	if err != nil {
 		return nil, err
@@ -91,92 +90,68 @@ func NewForward(s *Slex, localAddr, rawRoute string, position int) (*Forward, er
 
 	f := &Forward{
 		ID:        RandString(8),
-		localAddr: localAddr,
 		routeInfo: routeInfo,
 		s:         s,
 		ready:     make(chan bool),
-	}
-
-	if f.routeInfo.isStartNode() {
-		err = f.listenAndAccept()
-		if err != nil {
-			return nil, err
-		}
+		errChan:   make(chan error),
 	}
 	return f, nil
 }
 
-func (f *Forward) listenAndAccept() (err error) {
-	var network string
-	switch f.routeInfo.scheme {
-	case SchemeRDP, SchemeTCP, SchemeVNC:
-		network = SchemeTCP
-	default:
-		return fmt.Errorf("unknown scheme(%v) for route", f.routeInfo.scheme)
-	}
-	f.listener, err = net.Listen(network, f.localAddr)
+func (f *Forward) Run() (err error) {
+
+	err = f.Dial()
 	if err != nil {
+		log.Error("[Forward] dial raw route(%v) err: %v", f.routeInfo.raw, err)
 		return
 	}
 
-	log.Info("[Forward] listen local port at: %v", f.localAddr)
-	var srcHandle = func(c net.Conn) {
-		f.Conn = newConn(c)
+	go f.loopRead()
+	return nil
+}
 
-		err = f.Dial()
-		if err != nil {
-			log.Error("[Forward] dial raw route(%v) err: %v", f.routeInfo.raw, err)
-			f.Conn.Write([]byte(fmt.Sprintf("dial raw route(%v) err: %v", f.routeInfo.raw, err)))
-			f.Close()
+func (f *Forward) loopRead() {
+	var err error
+	var channelName, direction string
+	if f.routeInfo.isStartNode() {
+		select {
+		case <-f.ready:
+		case err = <-f.errChan:
+			log.Error("[Forward] ready to read from %v err: %v", f.ID, err)
 			return
 		}
-
-		go func() {
-			<-f.ready
-
-			log.Info("[Forward] start to read src(%v, %v)...", f.localAddr, f.ID)
-			buf := make([]byte, 4096)
-			for {
-				var n int
-				n, err = f.Read(buf)
-				if err != nil {
-					break
-				}
-
-				channelName := f.routeInfo.nextNode()
-				channel, ok := f.s.GetChannel(channelName)
-				if !ok || channel == nil {
-					log.Error("[Forward] find channel(%v) to write data forward but not found: %v", channelName)
-					//TODO: close and notify
-					continue
-				}
-
-				writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
-					"result":    "success",
-					"route":     f.routeInfo.raw,
-					"position":  f.routeInfo.position,
-					"fid":       f.DstID,
-					"direction": RouteToRight,
-				}, buf[:n])
-			}
-
-			log.Info("[Forward] stop reading src(%v, %v)", f.localAddr, f.ID)
-		}()
+		channelName, direction = f.routeInfo.nextNode(), RouteToRight
+	} else if f.routeInfo.isEndNode() {
+		channelName, direction = f.routeInfo.prevNode(), RouteToLeft
+	} else {
+		log.Error("[Forward] forward route info is wrong")
+		return
 	}
-
-	go func() {
-		for {
-			c, err := f.listener.Accept()
-			if err != nil {
-				if x, ok := err.(*net.OpError); ok && x.Op == "accept" {
-					break
-				}
-				continue
-			}
-			go srcHandle(c)
+	log.Info("[Forward] start to read from (%v)...", f.ID)
+	buf := make([]byte, 4096)
+	for {
+		var n int
+		n, err = f.Read(buf)
+		if err != nil {
+			break
 		}
-	}()
-	return nil
+
+		channel, ok := f.s.GetChannel(channelName)
+		if !ok || channel == nil {
+			log.Error("[Forward] find channel(%v) to write data forward but not found: %v", channelName)
+			//TODO: close and notify
+			continue
+		}
+
+		writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
+			"result":    "success",
+			"route":     f.routeInfo.raw,
+			"position":  f.routeInfo.position,
+			"fid":       f.DstID,
+			"direction": direction,
+		}, buf[:n])
+	}
+	log.Info("[Forward] stop reading from (%v)", f.ID)
 }
 
 func (f *Forward) Dial() (err error) {
@@ -229,37 +204,7 @@ func (f *Forward) DialDst() (err error) {
 	}
 
 	f.Conn = newConn(c)
-	log.Info("[Forward] start to read from dst(%v)...", f.routeInfo.destination)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			var n int
-			n, err = f.Read(buf)
-			if err != nil {
-				log.Error("[Forward] read dst(%v) err: %v", f.routeInfo.destination, err)
-				break
-			}
-
-			channelName := f.routeInfo.prevNode()
-			channel, ok := f.s.GetChannel(channelName)
-			if !ok || channel == nil {
-				log.Error("[Forward] find channel(%v) to write data back but not found: %v", channelName)
-				//TODO: close and notify
-				continue
-			}
-
-			writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
-				"result":    "success",
-				"route":     f.routeInfo.raw,
-				"position":  f.routeInfo.position,
-				"fid":       f.DstID,
-				"direction": RouteToLeft,
-			}, buf[:n])
-		}
-
-		log.Info("[Forward] stop reading dst(%v)", f.routeInfo.destination)
-	}()
-
+	go f.loopRead()
 	return nil
 }
 
@@ -270,12 +215,78 @@ func (f *Forward) Close() error {
 	return nil
 }
 
-func (f *Forward) CloseAll() error {
-	if f.Conn != nil {
-		f.Conn.Close()
+type ForwardCreator struct {
+	Route    *route
+	Local    string
+	s        *Slex
+	listener net.Listener
+}
+
+func NewForwardCreator(s *Slex, rawRoute, local string) (*ForwardCreator, error) {
+	r, err := parseRoute(rawRoute, 0)
+	if err != nil {
+		return nil, err
 	}
-	if f.listener != nil {
-		f.listener.Close()
+	return &ForwardCreator{
+		s:     s,
+		Route: r,
+		Local: local,
+	}, nil
+}
+
+func (creator *ForwardCreator) listenAndAccept() (err error) {
+	var network string
+	switch creator.Route.scheme {
+	case SchemeRDP, SchemeTCP, SchemeVNC:
+		network = SchemeTCP
+	default:
+		return fmt.Errorf("unknown scheme(%v) for route", creator.Route.scheme)
 	}
+	creator.listener, err = net.Listen(network, creator.Local)
+	if err != nil {
+		return
+	}
+
+	log.Info("[ForwardCreator] listen local port at: %v for creating forward(%v)", creator.Local, creator.Route.raw)
+	var srcHandle = func(c net.Conn) {
+		f, err := creator.Create(c)
+		if err != nil {
+			log.Info("[ForwardCreator] create forward at port(%v) err: %v", creator.Local, err)
+			return
+		}
+		err = creator.s.AddForward(f)
+		if err != nil {
+			log.Error("[ForwardCreator] add forward(%v) to slex err: %v", f.ID, err)
+			f.Close()
+			return
+		}
+		err = f.Run()
+		if err != nil {
+			f.Close()
+		}
+	}
+
+	go func() {
+		for {
+			c, err := creator.listener.Accept()
+			if err != nil {
+				if x, ok := err.(*net.OpError); ok && x.Op == "accept" {
+					break
+				}
+				continue
+			}
+			go srcHandle(c)
+		}
+	}()
 	return nil
+}
+
+func (creator *ForwardCreator) Create(raw net.Conn) (*Forward, error) {
+	f, err := NewForward(creator.s, creator.Route.raw, creator.Route.position)
+	if err != nil {
+		return nil, err
+	}
+	f.Conn = newConn(raw)
+	f.DstID = f.ID
+	return f, nil
 }
