@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,6 +15,12 @@ const (
 	RouterSeparator = "->"
 	RouteToRight    = "-->"
 	RouteToLeft     = "<--"
+)
+
+const (
+	ForwardStateDialing uint32 = iota
+	ForwardStateEstablished
+	ForwardStateClosed
 )
 
 type route struct {
@@ -80,6 +87,8 @@ type Forward struct {
 	ready   chan bool
 	errChan chan error
 	s       *Slex
+
+	state uint32
 }
 
 func NewForward(s *Slex, rawRoute string, position int) (*Forward, error) {
@@ -99,7 +108,6 @@ func NewForward(s *Slex, rawRoute string, position int) (*Forward, error) {
 }
 
 func (f *Forward) Run() (err error) {
-
 	err = f.Dial()
 	if err != nil {
 		log.Error("[Forward] dial raw route(%v) err: %v", f.routeInfo.raw, err)
@@ -113,16 +121,20 @@ func (f *Forward) Run() (err error) {
 func (f *Forward) loopRead() {
 	var err error
 	var channelName, direction string
+	var pos int
 	if f.routeInfo.isStartNode() {
 		select {
 		case <-f.ready:
+			atomic.StoreUint32(&f.state, ForwardStateEstablished)
 		case err = <-f.errChan:
 			log.Error("[Forward] ready to read from %v err: %v", f.ID, err)
 			return
 		}
 		channelName, direction = f.routeInfo.nextNode(), RouteToRight
+		pos = f.routeInfo.position + 1
 	} else if f.routeInfo.isEndNode() {
 		channelName, direction = f.routeInfo.prevNode(), RouteToLeft
+		pos = f.routeInfo.position - 1
 	} else {
 		log.Error("[Forward] forward route info is wrong")
 		return
@@ -137,26 +149,39 @@ func (f *Forward) loopRead() {
 		}
 
 		channel, ok := f.s.GetChannel(channelName)
-		if !ok || channel == nil {
+		if !ok {
 			log.Error("[Forward] find channel(%v) to write data forward but not found: %v", channelName)
-			//TODO: close and notify
-			continue
+			break
 		}
 
 		writeJsonAndBytes(channel, CmdDataForward, goutil.Map{
 			"result":    "success",
 			"route":     f.routeInfo.raw,
-			"position":  f.routeInfo.position,
-			"fid":       f.DstID,
+			"position":  pos,
+			"fid":       f.ID,
+			"dstID":     f.DstID,
 			"direction": direction,
 		}, buf[:n])
 	}
 	log.Info("[Forward] stop reading from (%v)", f.ID)
+	if f.state != ForwardStateClosed {
+		//
+		channel, ok := f.s.GetChannel(channelName)
+		if ok {
+			writeJson(channel, CmdErrNotify, goutil.Map{
+				"route":     f.routeInfo.raw,
+				"position":  pos,
+				"fid":       f.DstID,
+				"direction": direction,
+			})
+		}
+	}
 }
 
 func (f *Forward) Dial() (err error) {
 	var channelName, fid, dstID string
 	var cmd byte
+	var pos int
 	if f.routeInfo.isEndNode() {
 		err = f.DialDst()
 		if err != nil {
@@ -166,21 +191,23 @@ func (f *Forward) Dial() (err error) {
 		fid = f.ID
 		dstID = f.SrcID
 		cmd = CmdForwardDialResp
+		pos = f.routeInfo.position - 1
 	} else {
 		channelName = f.routeInfo.nextNode()
 		fid = f.SrcID
 		cmd = CmdForwardDial
+		pos = f.routeInfo.position + 1
 	}
 
 	channel, ok := f.s.GetChannel(channelName)
-	if !ok || channel == nil {
+	if !ok {
 		return fmt.Errorf("chanel(%v) not found", channelName)
 	}
 
 	writeJson(channel, cmd, goutil.Map{
 		"result":   "success",
 		"route":    f.routeInfo.raw,
-		"position": f.routeInfo.position,
+		"position": pos,
 		"fid":      fid,
 		"dstID":    dstID,
 	})
@@ -212,6 +239,7 @@ func (f *Forward) Close() error {
 	if f.Conn != nil {
 		f.Conn.Close()
 	}
+	atomic.StoreUint32(&f.state, ForwardStateClosed)
 	return nil
 }
 
@@ -260,6 +288,8 @@ func (creator *ForwardCreator) listenAndAccept() (err error) {
 			f.Close()
 			return
 		}
+		log.Info("[ForwardCreator] create forword(%v) at port(%v) for route(%v)",
+			f.ID, creator.Local, creator.Route.raw)
 		err = f.Run()
 		if err != nil {
 			f.Close()
@@ -287,6 +317,6 @@ func (creator *ForwardCreator) Create(raw net.Conn) (*Forward, error) {
 		return nil, err
 	}
 	f.Conn = newConn(raw)
-	f.DstID = f.ID
+	f.SrcID = f.ID
 	return f, nil
 }

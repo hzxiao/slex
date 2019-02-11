@@ -276,3 +276,12 @@ func (s *Slex) GetForward(fid string) (*Forward, bool) {
 	f, ok := s.Forwards[fid]
 	return f, ok
 }
+
+func (s *Slex) DeleteForward(fid string) *Forward {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	f := s.Forwards[fid]
+	delete(s.Forwards, fid)
+	return f
+}

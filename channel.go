@@ -118,6 +118,10 @@ func (c *Channel) loopRead() {
 		err = c.Handle(msg)
 		if err != nil {
 			log.Error("[Channel] handle message on channel(%v) err: %v", c.RemoteAddr, err)
+			err = c.NotifyError(msg, err)
+			if err != nil {
+				log.Error("[Forward] notify error info err: %v", err)
+			}
 		}
 	}
 
@@ -141,13 +145,17 @@ func (c *Channel) Handle(msg *Message) error {
 	if err != nil {
 		return err
 	}
+	routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")))
+	if err != nil {
+		return err
+	}
 	switch msg.Cmd {
 	case CmdForwardDial:
 		if !c.s.IsServer {
 			return fmt.Errorf("not allow to dial throught slex client mode node")
 		}
 
-		forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")+1))
+		forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")))
 		if err != nil {
 			return err
 		}
@@ -160,13 +168,7 @@ func (c *Channel) Handle(msg *Message) error {
 		}
 
 	case CmdForwardDialResp:
-		routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")-1))
-		if err != nil {
-			return err
-		}
-
 		if routeInfo.isStartNode() {
-			//find forward by id
 			fid := info.GetString("dstID")
 			forward, ok := c.s.GetForward(fid)
 			if !ok {
@@ -182,46 +184,37 @@ func (c *Channel) Handle(msg *Message) error {
 				return fmt.Errorf("write forward dial resp to channel(%v), but not found", channelName)
 			}
 
-			info.Set("position", routeInfo.position)
+			info.Set("position", routeInfo.position-1)
 			writeJson(channel, msg.Cmd, info)
 		}
 
 	case CmdDataForward:
 		var (
-			position    int
-			routeInfo   *route
 			edge        bool
 			channelName string
+			pos         int
 		)
 		switch info.GetString("direction") {
 		case RouteToRight:
-			position = int(info.GetInt64("position") + 1)
-			routeInfo, err = parseRoute(info.GetString("route"), position)
-			if err != nil {
-				return err
-			}
 			if routeInfo.isEndNode() {
 				edge = true
 			} else {
 				channelName = routeInfo.nextNode()
+				pos = routeInfo.position + 1
 			}
 		case RouteToLeft:
-			position = int(info.GetInt64("position") - 1)
-			routeInfo, err = parseRoute(info.GetString("route"), position)
-			if err != nil {
-				return err
-			}
 			if routeInfo.isStartNode() {
 				edge = true
 			} else {
 				channelName = routeInfo.prevNode()
+				pos = routeInfo.position - 1
 			}
 		default:
 			return fmt.Errorf("unknown direction")
 		}
 
 		if edge {
-			fid := info.GetString("fid")
+			fid := info.GetString("dstID")
 			forward, ok := c.s.GetForward(fid)
 			if !ok {
 				return fmt.Errorf("write forward data to forward(%v), but not found", fid)
@@ -233,18 +226,93 @@ func (c *Channel) Handle(msg *Message) error {
 				return fmt.Errorf("write forward data to channel(%v), but not found", channelName)
 			}
 
-			info.Set("position", routeInfo.position)
+			info.Set("position", pos)
 			writeJsonAndBytes(channel, msg.Cmd, info, data)
 		}
 	case CmdErrNotify:
+		var (
+			edge        bool
+			channelName string
+			pos         int
+		)
+		switch info.GetString("direction") {
+		case RouteToRight:
+			if routeInfo.isEndNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.nextNode()
+				pos = routeInfo.position + 1
+			}
+		case RouteToLeft:
+			if routeInfo.isStartNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.prevNode()
+				pos = routeInfo.position - 1
+			}
+		default:
+			return fmt.Errorf("unknown direction")
+		}
 
+		if edge {
+			fid := info.GetString("fid")
+			forward := c.s.DeleteForward(fid)
+			if forward != nil {
+				forward.Close()
+			}
+		} else {
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("notify error info to channel(%v), but not found", channelName)
+			}
+
+			info.Set("position", pos)
+			writeJsonAndBytes(channel, msg.Cmd, info, data)
+		}
 	default:
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}
 	return nil
 }
 
-func (c *Channel) Notify(r *route) error {
+func (c *Channel) NotifyError(msg *Message, cause error) error {
+	if msg == nil {
+		return fmt.Errorf("invalid message: null msg")
+	}
+	info, _, err := decodeJsonAndBytes(msg.Body)
+	if err != nil {
+		return err
+	}
+	routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")))
+	if err != nil {
+		return err
+	}
+
+	var channelName, direction string
+	var pos int
+	switch {
+	case msg.Cmd == CmdForwardDial ||
+		(msg.Cmd == CmdDataForward && info.GetString("direction") == RouteToRight):
+		channelName = routeInfo.prevNode()
+		pos = routeInfo.position - 1
+		direction = RouteToLeft
+	case msg.Cmd == CmdForwardDialResp ||
+		(msg.Cmd == CmdDataForward && info.GetString("direction") == RouteToLeft):
+		channelName = routeInfo.nextNode()
+		pos = routeInfo.position + 1
+		direction = RouteToRight
+	case msg.Cmd == CmdErrNotify:
+		return nil
+	}
+
+	info.Set("massage", cause)
+	info.Set("position", pos)
+	info.Set("direction", direction)
+	channel, ok := c.s.GetChannel(channelName)
+	if !ok {
+		return fmt.Errorf("find channel(%v) to notify error info, but not found", channelName)
+	}
+	writeJson(channel, CmdErrNotify, info)
 	return nil
 }
 
