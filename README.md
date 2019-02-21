@@ -44,7 +44,7 @@ go install $GOPATH/github.com/hzxiao/slex/cmd/slex
    slex -s -f slex-srv.yaml
    ```
 
-3. 修改`slex-cli.yaml`文件，公司公网IP为x.x.x.x, 内外IP为192.168.1.x
+3. 修改`slex-cli.yaml`文件，公司公网IP为x.x.x.x, 内外IP为10.0.0.x
 
    ```yaml
    name: Client
@@ -57,7 +57,7 @@ go install $GOPATH/github.com/hzxiao/slex/cmd/slex
    forwards:
      -
        local: :8890
-       route: Server->tcp://192.168.1.y:22
+       route: Server->tcp://10.0.0.y:22
    ```
 
 4. 运行本机的`slex`
