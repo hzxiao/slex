@@ -12,6 +12,7 @@ type TestRaw struct {
 	buf  *bytes.Buffer
 	cond *sync.Cond
 
+	lock   *sync.Mutex
 	closed bool
 }
 
@@ -27,10 +28,16 @@ func (tr *TestRaw) Read(buf []byte) (int, error) {
 	if tr.closed {
 		return 0, io.EOF
 	}
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
+
 	return tr.buf.Read(buf)
 }
 
 func (tr *TestRaw) Write(buf []byte) (int, error) {
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
+
 	n, err := tr.buf.Write(buf)
 	if err != nil {
 		return 0, err
@@ -41,6 +48,8 @@ func (tr *TestRaw) Write(buf []byte) (int, error) {
 }
 
 func (tr *TestRaw) Close() error {
+	tr.lock.Lock()
+	defer tr.lock.Unlock()
 	tr.closed = true
 	tr.cond.Broadcast()
 	return nil
@@ -51,6 +60,7 @@ func TestConn_ReadFull(t *testing.T) {
 	raw := &TestRaw{
 		buf:  &bytes.Buffer{},
 		cond: sync.NewCond(&sync.Mutex{}),
+		lock: &sync.Mutex{},
 	}
 	conn := newConn(raw)
 

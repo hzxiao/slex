@@ -121,66 +121,88 @@ func (s *Slex) listenAndAccept() error {
 }
 
 func (s *Slex) handle(raw net.Conn) {
-	conn := newConn(raw)
-	firstMsg, err := conn.ReadMessage()
+	channel, response, err := s.acceptChannel(raw)
 	if err != nil {
-		log.Error("[Slex] read message from raw(%v) err: %v", raw.RemoteAddr())
+		log.Error("[Slex] accept channel %v", err)
+		writeJson(newConn(raw), CmdChannelConnectResp, response)
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
+		raw.Close()
 		return
 	}
-	if firstMsg.Cmd != CmdChannelConnect {
-		log.Warn("[Slex] recv first cmd is not 'connect' from raw（%v)", raw.RemoteAddr())
-		writeJson(conn, CmdChannelConnectResp, goutil.Map{
-			"result":  "fail",
-			"message": "Wrong first cmd",
-			"forbid":  true,
-		})
-		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
-		return
-	}
-
-	data, _, err := decodeJsonAndBytes(firstMsg.Body)
+	err = s.AddChannel(channel)
 	if err != nil {
-		log.Error("[Slex] decode json data(%v) from raw（%v) err: %v", firstMsg.Body, raw.RemoteAddr(), err)
-		writeJson(conn, CmdChannelConnectResp, goutil.Map{
-			"result":  "fail",
-			"message": "Decode json error",
-			"forbid":  true,
-		})
-		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
-		return
-	}
-
-	ok, err := s.Auth(data)
-	if err != nil {
-		log.Error("[Slex] auth client by data(%v) from raw（%v) err: %v", goutil.Struct2Json(data), raw.RemoteAddr(), err)
-		writeJson(conn, CmdChannelConnectResp, goutil.Map{
+		log.Error("[Slex] add channel by name(%v) err: %v", channel.Name)
+		writeJson(newConn(raw), CmdChannelConnectResp, goutil.Map{
 			"result":  "fail",
 			"message": err.Error(),
 			"forbid":  true,
 		})
 		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
+		raw.Close()
+		return
+	}
+
+	writeJson(channel, CmdChannelConnectResp, goutil.Map{
+		"result": "success",
+		"name":   s.Config.Name,
+	})
+	log.Info("[Slex] auth success and add a new channel(%v), addr(%v)", channel.Name, raw.RemoteAddr())
+
+	go channel.loopRead()
+}
+
+func (s *Slex) acceptChannel(raw net.Conn) (channel *Channel, response goutil.Map, err error) {
+	conn := newConn(raw)
+	firstMsg, err := conn.ReadMessage()
+	if err != nil {
+		err = fmt.Errorf("read message from raw(%v) err: %v", raw.RemoteAddr(), err)
+		return
+	}
+
+	if firstMsg.Cmd != CmdChannelConnect {
+		err = fmt.Errorf("recv first cmd is not 'connect' from raw（%v)", raw.RemoteAddr())
+		response = goutil.Map{
+			"result":  "fail",
+			"message": "Wrong first cmd",
+			"forbid":  true,
+		}
+		return
+	}
+
+	data, _, err := decodeJsonAndBytes(firstMsg.Body)
+	if err != nil {
+		err = fmt.Errorf("decode json data(%v) from raw（%v) err: %v", firstMsg.Body, raw.RemoteAddr(), err)
+		response = goutil.Map{
+			"result":  "fail",
+			"message": "Decode json error",
+			"forbid":  true,
+		}
+		return
+	}
+
+	ok, err := s.Auth(data)
+	if err != nil {
+		response = goutil.Map{
+			"result":  "fail",
+			"message": err.Error(),
+			"forbid":  true,
+		}
+		err = fmt.Errorf("auth client by data(%v) from raw（%v) err: %v", goutil.Struct2Json(data), raw.RemoteAddr(), err)
 		return
 	}
 
 	if !ok {
-		log.Warn("[Slex] auth client by data(%v) from raw（%v) fail", goutil.Struct2Json(data), raw.RemoteAddr())
-		writeJson(conn, CmdChannelConnectResp, goutil.Map{
+		err = fmt.Errorf("auth client by data(%v) from raw（%v) fail", goutil.Struct2Json(data), raw.RemoteAddr())
+		response = goutil.Map{
 			"result":  "fail",
 			"message": "No Permission",
 			"forbid":  true,
-		})
-		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
+		}
 		return
 	}
 
-	//add a new channel
-	channel := &Channel{
+	//new channel
+	channel = &Channel{
 		Conn:       conn,
 		s:          s,
 		Name:       data.GetString("name"),
@@ -188,25 +210,7 @@ func (s *Slex) handle(raw net.Conn) {
 		RemoteAddr: raw.RemoteAddr().String(),
 		State:      ChanStateConnected,
 	}
-	err = s.AddChannel(channel)
-	if err != nil {
-		log.Error("[Slex] add channel by name(%v) err: %v", channel.Name)
-		writeJson(conn, CmdChannelConnectResp, goutil.Map{
-			"result":  "fail",
-			"message": err.Error(),
-			"forbid":  true,
-		})
-		log.Info("[Slex] close raw(%v)", raw.RemoteAddr())
-		conn.Close()
-	}
-
-	writeJson(conn, CmdChannelConnectResp, goutil.Map{
-		"result": "success",
-		"name":   s.Config.Name,
-	})
-	log.Info("[Slex] auth success and add a new channel(%v), addr(%v)", data.GetString("name"), raw.RemoteAddr())
-
-	go channel.loopRead()
+	return
 }
 
 func (s *Slex) Auth(info goutil.Map) (bool, error) {

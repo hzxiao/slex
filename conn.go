@@ -80,8 +80,8 @@ func (c *conn) Close() error {
 	return c.Raw.Close()
 }
 
-func writeJson(conn Conn, cmd byte, data goutil.Map) (int, error) {
-	return writeJsonAndBytes(conn, cmd, data, nil)
+func writeJson(conn Conn, cmd byte, data goutil.Map) {
+	writeJsonAndBytes(conn, cmd, data, nil)
 }
 
 func writeJsonAndBytes(conn Conn, cmd byte, info goutil.Map, data []byte) (int, error) {
