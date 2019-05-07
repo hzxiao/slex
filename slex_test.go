@@ -3,7 +3,6 @@ package slex
 import (
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/assert"
-	"github.com/hzxiao/slex/conf"
 	"io"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 
 func TestSlex_Auth(t *testing.T) {
 	s := &Slex{
-		Config: &conf.Config{
+		Config: &Config{
 			Access: []struct {
 				Name  string
 				Token string
@@ -62,7 +61,7 @@ func TestSlex_AddChannel(t *testing.T) {
 func TestSlex_EstablishChannels(t *testing.T) {
 	listen := "localhost:2203"
 	server := &Slex{
-		Config: &conf.Config{
+		Config: &Config{
 			Name:   "srv",
 			Listen: listen,
 			Access: []struct {
@@ -89,7 +88,7 @@ func TestSlex_EstablishChannels(t *testing.T) {
 	<-start
 	//success
 	client := &Slex{
-		Config: &conf.Config{
+		Config: &Config{
 			Name: "cli",
 			Channels: []struct {
 				Name   string
@@ -122,7 +121,7 @@ func TestSlex_EstablishChannels(t *testing.T) {
 
 	//dup name fail
 	client2 := &Slex{
-		Config: &conf.Config{
+		Config: &Config{
 			Name: "cli",
 			Channels: []struct {
 				Name   string
@@ -149,7 +148,7 @@ func TestSlex_EstablishChannels(t *testing.T) {
 
 	//access fail
 	client3 := &Slex{
-		Config: &conf.Config{
+		Config: &Config{
 			Name: "cli",
 			Channels: []struct {
 				Name   string

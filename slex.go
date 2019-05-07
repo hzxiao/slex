@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
-	"github.com/hzxiao/slex/conf"
 	"net"
 	"sync"
 )
@@ -16,7 +15,7 @@ const (
 )
 
 type Slex struct {
-	Config   *conf.Config
+	Config   *Config
 	IsServer bool
 
 	forwardCreators []*ForwardCreator
@@ -26,7 +25,7 @@ type Slex struct {
 	lock sync.Mutex
 }
 
-func NewSlex(config *conf.Config, isServer bool) *Slex {
+func NewSlex(config *Config, isServer bool) *Slex {
 	return &Slex{
 		Config:   config,
 		IsServer: isServer,

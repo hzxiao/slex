@@ -1,4 +1,4 @@
-package conf
+package slex
 
 import (
 	"github.com/hzxiao/goutil/assert"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseConfig(t *testing.T) {
-	c, err := ParseConfig("./slex.yaml")
+	c, err := ParseConfig("./conf/slex.yaml")
 	assert.NoError(nil, err)
 	assert.NotNil(t, c)
 }

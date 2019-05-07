@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/hzxiao/slex"
-	"github.com/hzxiao/slex/conf"
 	flag "github.com/spf13/pflag"
 	"os"
 	"os/signal"
+	"slex"
 )
 
 const version = "0.0.1"
@@ -43,7 +42,7 @@ func main() {
 		exit(1)
 	}
 
-	cfg, err := conf.ParseConfig(*cfgName)
+	cfg, err := slex.ParseConfig(*cfgName)
 	if err != nil {
 		fmt.Println(err)
 		exit(1)
