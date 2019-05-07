@@ -18,6 +18,3 @@ forwards:
   -
     local: :8890
     route: Server->tcp://192.168.2.60:22
-  -
-    local: :8891
-    route: Server->tcp://192.168.2.28:3389
