@@ -2,6 +2,9 @@ name: Server
 
 listen: :2303
 
+# Defines whether a route can pass through the node
+relay: true
+
 access:
   -
     name: Client

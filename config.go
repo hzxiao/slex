@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Name   string
 	Listen string
+	Relay  bool
 	Access []struct {
 		Name  string
 		Token string

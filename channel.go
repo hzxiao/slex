@@ -151,13 +151,13 @@ func (c *Channel) Handle(msg *Message) error {
 	}
 	switch msg.Cmd {
 	case CmdForwardDial:
-		if !c.s.IsServer {
-			return fmt.Errorf("not allow to dial throught slex client mode node")
-		}
-
 		forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")))
 		if err != nil {
 			return err
+		}
+
+		if !forward.routeInfo.isEndNode() && !c.s.Config.Relay {
+			return fmt.Errorf("not support rely")
 		}
 
 		forward.SrcID = info.GetString("fid")
