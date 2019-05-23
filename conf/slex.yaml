@@ -24,3 +24,22 @@ forwards:
     local: :8901
     route: Server->tcp://192.168.2.66:22
 
+whiteList:
+  -
+    host: 192.168.10.1
+    ports:
+      - 1000
+      - 2000-65535
+  -
+      host: 192.168.20.0/24
+      ports:
+      - 1000
+      - 2000-65535
+  -
+      host: localhost
+      ports:
+      - 1000
+      - 2000-65535
+
+blackList:
+  - 192.168.10.2
