@@ -5,6 +5,8 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -27,16 +29,62 @@ type Config struct {
 		Route string
 	}
 
-	WhiteList []*whiteList `yaml:"whiteList"`
-	BlackList []string     `yaml:"blackList"`
+	WhiteList []*Addr `yaml:"whiteList"`
+	BlackList []*Addr `yaml:"blackList"`
 }
 
-type whiteList struct {
+type Addr struct {
 	Type      string
 	Host      string   `yaml:"host"`
 	Ports     []string `yaml:"ports"`
 	IPNet     *net.IPNet
 	PortRange portRange
+}
+
+func (addr *Addr) parseHost() {
+	_, ipNet, err := net.ParseCIDR(addr.Host)
+	if err == nil {
+		addr.Type = "IP"
+		addr.IPNet = ipNet
+	} else if ip := net.ParseIP(addr.Host); ip != nil {
+		addr.Type = "IP"
+		addr.IPNet = &net.IPNet{
+			IP:   ip,
+			Mask: net.CIDRMask(32, 32),
+		}
+	} else {
+		addr.Type = "DOMAIN"
+	}
+}
+
+func (addr *Addr) parsePort() error {
+	var err error
+	addr.PortRange, err = parsePortRange(addr.Ports)
+	return err
+}
+
+func (addr *Addr) Match(host string, port int) bool {
+	if addr.Type == "IP" {
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return false
+		}
+		return addr.IPNet.Contains(ip) && addr.PortRange.Contains(port)
+	}
+
+	return addr.Host == host && addr.PortRange.Contains(port)
+}
+
+func (addr *Addr) MatchHost(host string) bool {
+	if addr.Type == "IP" {
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return false
+		}
+		return addr.IPNet.Contains(ip)
+	}
+
+	return addr.Host == host
 }
 
 func ParseConfig(filename string) (*Config, error) {
@@ -55,7 +103,7 @@ func ParseConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 
-	err = cfg.processAllowHost()
+	err = cfg.processAddr()
 	if err != nil {
 		return nil, err
 	}
@@ -105,24 +153,22 @@ func (c *Config) checkAndFormatForward() error {
 	return nil
 }
 
-func (c *Config) processAllowHost() error {
-	for _, white := range c.WhiteList {
-		_, ipNet, err := net.ParseCIDR(white.Host)
-		if err == nil {
-			white.Type = "IP"
-			white.IPNet = ipNet
-		} else if ip := net.ParseIP(white.Host); ip != nil {
-			white.Type = "IP"
-			white.IPNet = &net.IPNet{
-				IP:   ip,
-				Mask: net.CIDRMask(32, 32),
-			}
-		} else {
-			white.Type = "DOMAIN"
+func (c *Config) processAddr() (err error) {
+	for _, addr := range c.WhiteList {
+		addr.parseHost()
+		err = addr.parsePort()
+		if err != nil {
+			return
 		}
-
 	}
-	return nil
+	for _, addr := range c.BlackList {
+		addr.parseHost()
+		err = addr.parsePort()
+		if err != nil {
+			return
+		}
+	}
+	return
 }
 
 func (c *Config) CheckAccess(name, token string) bool {
@@ -134,22 +180,61 @@ func (c *Config) CheckAccess(name, token string) bool {
 	return false
 }
 
-func (c *Config) AllowDialAddr(host string, port int) bool {
-	return true
+//AllowDialAddr check whether addr can be dialed
+// host can be ip or domain name
+// port list 8080 or :8080
+func (c *Config) AllowDialAddr(host string, port string) bool {
+	port = strings.TrimPrefix(port, ":")
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return false
+	}
+	if p < 0 || p > 65535 {
+		return false
+	}
+	for _, addr := range c.BlackList {
+		if addr.MatchHost(host) {
+			return false
+		}
+	}
+	for _, addr := range c.WhiteList {
+		if addr.Match(host, p) {
+			return true
+		}
+	}
+	return false
 }
 
 type portRange [][2]int
 
-func parsePort(ps []string) (portRange, error) {
-	var rg [][2]int
+func parsePortRange(ps []string) (portRange, error) {
+	var rg = make([][2]int, 0)
 	for _, p := range ps {
-		if !strings.Contains(p, "-") {
-			p = "-" + p
+		if p == "" {
+			return nil, fmt.Errorf("empty port")
 		}
-		//TODO spilt port range
+		if !strings.Contains(p, "-") {
+			p = p + "-" + p
+		}
+
+		parts := strings.SplitN(p, "-", 2)
+		low, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid port: %v", err)
+		}
+		high, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid port: %v", err)
+		}
+		if low > high {
+			return nil, fmt.Errorf("wrong port range")
+		}
+		rg = append(rg, [2]int{low, high})
 	}
 
-	return portRange(rg), nil
+	pr := portRange(rg)
+	pr = pr.Merge()
+	return pr, nil
 }
 
 func (r portRange) Len() int {
@@ -161,13 +246,52 @@ func (r portRange) Swap(i, j int) {
 }
 
 func (r portRange) Less(i, j int) bool {
+	if r[i][0] == r[j][0] {
+		return r[i][1] < r[j][1]
+	}
 	return r[i][0] < r[j][0]
 }
 
-func (r portRange) Merge() {
+func (r portRange) Merge() portRange {
+	if len(r) < 2 {
+		return r
+	}
 
+	sort.Sort(r)
+	var rg = make([][2]int, len(r))
+	copy(rg, r)
+	for i := 0; i < len(rg)-1; {
+		j := i + 1
+		switch true {
+		case rg[i][0] < rg[j][0] && rg[i][1] < rg[j][0]:
+			i++
+		case rg[i][0] < rg[j][0] && rg[i][1] == rg[j][0]:
+			rg[i][1] = rg[j][1]
+			if j < len(rg)-1 {
+				rg = append(rg[:j], rg[j+1:]...)
+			}
+		case rg[i][0] == rg[j][0]:
+			rg[i][1] = rg[j][1]
+			if j < len(rg)-1 {
+				rg = append(rg[:j], rg[j+1:]...)
+			}
+		case rg[i][1] >= rg[j][0]:
+			rg[i][1] = rg[j][1]
+			if j < len(rg)-1 {
+				rg = append(rg[:j], rg[j+1:]...)
+			}
+		default:
+			i++
+		}
+	}
+	return rg
 }
 
 func (r portRange) Contains(v int) bool {
-
+	for _, rg := range r {
+		if v >= rg[0] && v <= rg[1] {
+			return true
+		}
+	}
+	return false
 }
