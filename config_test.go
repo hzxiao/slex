@@ -179,3 +179,69 @@ func TestPortRange_Contains(t *testing.T) {
 		}
 	}
 }
+
+func TestAddr_MatchHost(t *testing.T) {
+	var tables = []struct{
+		Host string
+		Value string
+		Result bool
+	} {
+		{"172.1.0.1", "172.1.0.1", true},
+		{"172.1.0.1", "172.1.0.2", false},
+		{"172.1.0.1/24", "172.1.0.2", true},
+		{"localhost", "172.1.0.2", false},
+		{"localhost", "localhost", true},
+	}
+
+	for _, item := range tables {
+		addr := &Addr{Host: item.Host}
+		addr.parseHost()
+		if item.Result {
+			assert.True(t, addr.MatchHost(item.Value))
+		} else {
+			assert.False(t, addr.MatchHost(item.Value))
+		}
+	}
+}
+
+func TestAddr_Match(t *testing.T) {
+	var tables = []struct{
+		Host string
+		Ports []string
+		CheckHost string
+		CHeckPort int
+		Result bool
+	} {
+		{"172.1.0.1", []string{"1000-2000"}, "172.1.0.1", 1000,true},
+		{"172.1.0.1", []string{"1000-2000"}, "172.1.0.2", 1000,false},
+		{"172.1.0.1", []string{"1000-2000"}, "172.1.0.1", 3000,false},
+		{"172.1.0.0/24", []string{"1000-2000"}, "172.1.0.2", 1000,true},
+		{"localhost", []string{"1000-2000"}, "localhost", 1000,true},
+		{"localhost", []string{"1000-2000"}, "localhost", 3000,false},
+		{"localhost", []string{"1000-2000"}, "localhost2", 1000,false},
+	}
+
+	for _, item := range tables {
+		addr := &Addr{Host: item.Host, Ports: item.Ports}
+		addr.parseHost()
+		err := addr.parsePort()
+		assert.NoError(t, err)
+		if item.Result {
+			assert.True(t, addr.Match(item.CheckHost, item.CHeckPort))
+		} else {
+			assert.False(t, addr.Match(item.CheckHost, item.CHeckPort))
+		}
+	}
+}
+
+func TestConfig_AllowDialAddr(t *testing.T) {
+	c, err := ParseConfig("./testdata/addr-list.yaml")
+	assert.NoError(nil, err)
+	assert.NotNil(t, c)
+
+	assert.True(t, c.AllowDialAddr("192.168.10.1", "3000"))
+	assert.True(t, c.AllowDialAddr("192.168.20.2", "3000"))
+	assert.False(t, c.AllowDialAddr("192.168.20.1", "3000"))
+	assert.True(t, c.AllowDialAddr("localhost", "3000"))
+	assert.False(t, c.AllowDialAddr("192.168.20.255", "3000"))
+}
