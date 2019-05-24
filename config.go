@@ -257,31 +257,37 @@ func (r portRange) Merge() portRange {
 		return r
 	}
 
+	var deleteIndex = func(s [][2]int, index int) [][2]int {
+		if len(s) <= index {
+			return s
+		}
+		if index == len(s)-1{
+			return s[:index]
+		}
+		return append(s[:index], s[index+1:]...)
+	}
+
 	sort.Sort(r)
 	var rg = make([][2]int, len(r))
 	copy(rg, r)
 	for i := 0; i < len(rg)-1; {
 		j := i + 1
-		switch true {
-		case rg[i][0] < rg[j][0] && rg[i][1] < rg[j][0]:
-			i++
-		case rg[i][0] < rg[j][0] && rg[i][1] == rg[j][0]:
-			rg[i][1] = rg[j][1]
-			if j < len(rg)-1 {
-				rg = append(rg[:j], rg[j+1:]...)
+		if rg[i][0] < rg[j][0] {
+			switch {
+			case rg[i][1] < rg[j][0]:
+				i++
+			case rg[i][1] == rg[j][0]:
+				rg[i][1] = rg[j][1]
+				rg = deleteIndex(rg, j)
+			case rg[i][1] <= rg[j][1]:
+				rg[i][1] = rg[j][1]
+				rg = deleteIndex(rg, j)
+			default:
+				rg = deleteIndex(rg, j)
 			}
-		case rg[i][0] == rg[j][0]:
+		} else {
 			rg[i][1] = rg[j][1]
-			if j < len(rg)-1 {
-				rg = append(rg[:j], rg[j+1:]...)
-			}
-		case rg[i][1] >= rg[j][0]:
-			rg[i][1] = rg[j][1]
-			if j < len(rg)-1 {
-				rg = append(rg[:j], rg[j+1:]...)
-			}
-		default:
-			i++
+			rg = deleteIndex(rg, j)
 		}
 	}
 	return rg

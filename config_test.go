@@ -113,12 +113,12 @@ func TestPortRange_Merge(t *testing.T) {
 		Expect [][2]int
 	}{
 		{
-			Origin:portRange{},
-			Expect:[][2]int{},
+			Origin: portRange{},
+			Expect: [][2]int{},
 		},
 		{
-			Origin:portRange{{1, 2}},
-			Expect:[][2]int{{1, 2}},
+			Origin: portRange{{1, 2}},
+			Expect: [][2]int{{1, 2}},
 		},
 		{
 			Origin: portRange{{200, 300}, {100, 100}, {400, 400}},
@@ -126,11 +126,19 @@ func TestPortRange_Merge(t *testing.T) {
 		},
 		{
 			Origin: portRange{{100, 150}, {200, 300}, {100, 120}},
-			Expect: [][2]int{ {100, 150}, {200, 300}},
+			Expect: [][2]int{{100, 150}, {200, 300}},
 		},
 		{
 			Origin: portRange{{100, 120}, {120, 300}},
-			Expect: [][2]int{  {100, 300}},
+			Expect: [][2]int{{100, 300}},
+		},
+		{
+			Origin: portRange{{100, 300}, {120, 150}},
+			Expect: [][2]int{{100, 300}},
+		},
+		{
+			Origin: portRange{{100, 130}, {120, 150}},
+			Expect: [][2]int{{100, 150}},
 		},
 	}
 
@@ -142,5 +150,28 @@ func TestPortRange_Merge(t *testing.T) {
 }
 
 func TestPortRange_Contains(t *testing.T) {
+	var tables = []struct{
+		portRange portRange
+		Value int
+		Result bool
+	} {
+		{
+			portRange: portRange{{200, 300}, {100, 100}, {400, 400}},
+			Value: 100,
+			Result: true,
+		},
+		{
+			portRange: portRange{{200, 300}, {100, 100}, {400, 400}},
+			Value: 101,
+			Result: false,
+		},
+	}
 
+	for _, item := range tables {
+		if item.Result {
+			assert.True(t, item.portRange.Contains(item.Value))
+		} else {
+			assert.False(t, item.portRange.Contains(item.Value))
+		}
+	}
 }
