@@ -253,40 +253,49 @@ func (r portRange) Less(i, j int) bool {
 }
 
 func (r portRange) Merge() portRange {
+	if r == nil {
+		return nil
+	}
+
+	var rg = make([][2]int, len(r))
+	copy(rg, r)
+
 	if len(r) < 2 {
-		return r
+		return rg
 	}
 
 	var deleteIndex = func(s [][2]int, index int) [][2]int {
 		if len(s) <= index {
 			return s
 		}
-		if index == len(s)-1{
+		if index == len(s)-1 {
 			return s[:index]
 		}
 		return append(s[:index], s[index+1:]...)
 	}
 
-	sort.Sort(r)
-	var rg = make([][2]int, len(r))
-	copy(rg, r)
+	sort.Sort(portRange(rg))
+
 	for i := 0; i < len(rg)-1; {
 		j := i + 1
-		if rg[i][0] < rg[j][0] {
-			switch {
-			case rg[i][1] < rg[j][0]:
-				i++
-			case rg[i][1] == rg[j][0]:
-				rg[i][1] = rg[j][1]
-				rg = deleteIndex(rg, j)
-			case rg[i][1] <= rg[j][1]:
-				rg[i][1] = rg[j][1]
-				rg = deleteIndex(rg, j)
-			default:
-				rg = deleteIndex(rg, j)
-			}
-		} else {
-			rg[i][1] = rg[j][1]
+		// (x1, y1) (x2, y2)
+		x1, y1, x2, y2 := rg[i][0], rg[i][1], rg[j][0], rg[j][1]
+		if x1 == x2 {
+			rg[i][1] = y2 // y1 = y2
+			rg = deleteIndex(rg, j)
+			continue
+		}
+		// x1 < x2
+		switch {
+		case y1 < x2:
+			i++
+		case y1 == x2:
+			rg[i][1] = y2
+			rg = deleteIndex(rg, j)
+		case y1 <= y2: //y1 > x2 && y1 <= y2
+			rg[i][1] = y2
+			rg = deleteIndex(rg, j)
+		default: //y1 > x2 && y1 > y2
 			rg = deleteIndex(rg, j)
 		}
 	}

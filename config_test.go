@@ -113,6 +113,10 @@ func TestPortRange_Merge(t *testing.T) {
 		Expect [][2]int
 	}{
 		{
+			Origin: nil,
+			Expect: nil,
+		},
+		{
 			Origin: portRange{},
 			Expect: [][2]int{},
 		},
