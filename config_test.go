@@ -219,6 +219,7 @@ func TestAddr_Match(t *testing.T) {
 		{"localhost", []string{"1000-2000"}, "localhost", 1000,true},
 		{"localhost", []string{"1000-2000"}, "localhost", 3000,false},
 		{"localhost", []string{"1000-2000"}, "localhost2", 1000,false},
+		{"0.0.0.0/0", []string{"1000-2000"}, "192.168.10.100", 1000,true},
 	}
 
 	for _, item := range tables {
@@ -239,9 +240,12 @@ func TestConfig_AllowDialAddr(t *testing.T) {
 	assert.NoError(nil, err)
 	assert.NotNil(t, c)
 
-	assert.True(t, c.AllowDialAddr("192.168.10.1", "3000"))
-	assert.True(t, c.AllowDialAddr("192.168.20.2", "3000"))
-	assert.False(t, c.AllowDialAddr("192.168.20.1", "3000"))
-	assert.True(t, c.AllowDialAddr("localhost", "3000"))
-	assert.False(t, c.AllowDialAddr("192.168.20.255", "3000"))
+	assert.True(t, c.AllowDialAddr("192.168.10.1:3000"))
+	assert.True(t, c.AllowDialAddr("192.168.20.2:3000"))
+	assert.False(t, c.AllowDialAddr("192.168.20.1:3000"))
+	assert.True(t, c.AllowDialAddr("localhost:3000"))
+	assert.False(t, c.AllowDialAddr("192.168.20.255:3000"))
+	assert.False(t, c.AllowDialAddr("192.168.20.255:30000000"))
+	assert.False(t, c.AllowDialAddr(":3000"))
+	assert.False(t, c.AllowDialAddr(""))
 }

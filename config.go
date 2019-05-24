@@ -181,10 +181,12 @@ func (c *Config) CheckAccess(name, token string) bool {
 }
 
 //AllowDialAddr check whether addr can be dialed
-// host can be ip or domain name
-// port list 8080 or :8080
-func (c *Config) AllowDialAddr(host string, port string) bool {
-	port = strings.TrimPrefix(port, ":")
+// addr like be ip:port or hostname:port
+func (c *Config) AllowDialAddr(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
 	p, err := strconv.Atoi(port)
 	if err != nil {
 		return false

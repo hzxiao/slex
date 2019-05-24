@@ -225,6 +225,11 @@ func (f *Forward) Dial() (err error) {
 }
 
 func (f *Forward) DialDst() (err error) {
+	// check whether the addr allowed to be dialed
+	if !f.s.Config.AllowDialAddr(f.routeInfo.destination) {
+		return fmt.Errorf("not allowed address")
+	}
+
 	c, err := net.DialTimeout(f.routeInfo.scheme, f.routeInfo.destination, time.Second*15)
 	if err != nil {
 		return err
