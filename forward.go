@@ -1,6 +1,7 @@
 package slex
 
 import (
+	"context"
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
@@ -107,15 +108,34 @@ func NewForward(s *Slex, rawRoute string, position int) (*Forward, error) {
 	return f, nil
 }
 
+//Run start s forward
 func (f *Forward) Run() (err error) {
-	err = f.Dial()
-	if err != nil {
-		log.Error("[Forward] dial raw route(%v) err: %v", f.routeInfo.raw, err)
-		return
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+	
+	go func() {
+		err = f.Dial()
+		if err != nil {
+			cancel()
+		}	
+	}()
 
-	go f.loopRead()
-	return nil
+	select {
+	case <- ctx.Done():
+		if err == nil {
+			err = ctx.Err()
+		}
+	case e := <-f.errChan:
+		err = e
+	case <- f.ready:
+		atomic.StoreUint32(&f.state, ForwardStateEstablished)
+		go f.loopRead()
+	}
+	return
 }
 
 func (f *Forward) loopRead() {
@@ -123,13 +143,6 @@ func (f *Forward) loopRead() {
 	var channelName, direction string
 	var pos int
 	if f.routeInfo.isStartNode() {
-		select {
-		case <-f.ready:
-			atomic.StoreUint32(&f.state, ForwardStateEstablished)
-		case err = <-f.errChan:
-			log.Error("[Forward] ready to read from %v err: %v", f.ID, err)
-			return
-		}
 		channelName, direction = f.routeInfo.nextNode(), RouteToRight
 		pos = f.routeInfo.position + 1
 	} else if f.routeInfo.isEndNode() {
@@ -178,6 +191,7 @@ func (f *Forward) loopRead() {
 	}
 }
 
+//Dial start to dial target addr via slex node
 func (f *Forward) Dial() (err error) {
 	var channelName, fid, dstID string
 	var cmd byte
