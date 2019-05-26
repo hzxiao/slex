@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"github.com/hzxiao/slex"
 	flag "github.com/spf13/pflag"
 	"os"
 	"os/signal"
-	"slex"
 )
 
 const version = "0.0.1"
