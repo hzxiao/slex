@@ -112,6 +112,7 @@ func TestConn_ReadMessage(t *testing.T) {
 	raw := &TestRaw{
 		buf:  &bytes.Buffer{},
 		cond: sync.NewCond(&sync.Mutex{}),
+		lock: &sync.Mutex{},
 	}
 	conn := newConn(raw)
 

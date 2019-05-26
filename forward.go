@@ -87,6 +87,7 @@ type Forward struct {
 
 	ready   chan bool
 	errChan chan error
+	hbChan  chan bool
 	s       *Slex
 
 	state uint32
@@ -104,6 +105,7 @@ func NewForward(s *Slex, rawRoute string, position int) (*Forward, error) {
 		s:         s,
 		ready:     make(chan bool),
 		errChan:   make(chan error),
+		hbChan:    make(chan bool),
 	}
 	return f, nil
 }
@@ -116,29 +118,30 @@ func (f *Forward) Run() (err error) {
 			cancel()
 		}
 	}()
-	
+
 	go func() {
 		err = f.Dial()
 		if err != nil {
 			cancel()
-		}	
+		}
 	}()
 
 	select {
-	case <- ctx.Done():
+	case <-ctx.Done():
 		if err == nil {
 			err = ctx.Err()
 		}
 	case e := <-f.errChan:
 		err = e
-	case <- f.ready:
-		atomic.StoreUint32(&f.state, ForwardStateEstablished)
+	case <-f.ready:
 		go f.loopRead()
 	}
 	return
 }
 
 func (f *Forward) loopRead() {
+	atomic.StoreUint32(&f.state, ForwardStateEstablished)
+
 	var err error
 	var channelName, direction string
 	var pos int
@@ -152,6 +155,9 @@ func (f *Forward) loopRead() {
 		log.Error("[Forward] forward route info is wrong")
 		return
 	}
+
+	go f.StartHeartbeat()
+
 	log.Info("[Forward] start to read from (%v)...", f.ID)
 	buf := make([]byte, 4096)
 	for {
@@ -252,6 +258,48 @@ func (f *Forward) DialDst() (err error) {
 	f.Conn = newConn(c)
 	go f.loopRead()
 	return nil
+}
+
+func (f *Forward) StartHeartbeat() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for {
+			<-ticker.C
+			//send heartbeat
+			var channelName, direction string
+			var pos int
+			if f.routeInfo.isEndNode() {
+				channelName = f.routeInfo.prevNode()
+				pos = f.routeInfo.position - 1
+				direction = RouteToLeft
+			} else {
+				channelName = f.routeInfo.nextNode()
+				pos = f.routeInfo.position + 1
+				direction = RouteToRight
+			}
+
+			channel, ok := f.s.GetChannel(channelName)
+			if !ok {
+				break
+			}
+			writeJson(channel, CmdHeartbeat, goutil.Map{
+				"route":     f.routeInfo.raw,
+				"direction": direction,
+				"position":  pos,
+				"fid":       f.ID,
+				"dstID":     f.DstID,
+			})
+		}
+	}()
+
+	for {
+		select {
+		case <-time.After(10 * time.Second):
+			log.Error("[Forward] src(%v) -> dst(%v) heartbeat timeout", f.ID, f.DstID)
+			f.Close()
+		case <-f.hbChan:
+		}
+	}
 }
 
 func (f *Forward) Close() error {

@@ -269,6 +269,109 @@ func (c *Channel) Handle(msg *Message) error {
 			info.Set("position", pos)
 			writeJsonAndBytes(channel, msg.Cmd, info, data)
 		}
+	case CmdHeartbeat:
+		var (
+			edge        bool
+			channelName, direction string
+			pos         int
+		)
+		switch info.GetString("direction") {
+		case RouteToRight:
+			if routeInfo.isEndNode() {
+				edge = true
+				channelName = routeInfo.prevNode()
+				pos = routeInfo.position - 1
+				direction = RouteToLeft
+			} else {
+				channelName = routeInfo.nextNode()
+				pos = routeInfo.position + 1
+			}
+		case RouteToLeft:
+			if routeInfo.isStartNode() {
+				edge = true
+				channelName = routeInfo.nextNode()
+				pos = routeInfo.position + 1
+				direction = RouteToRight
+			} else {
+				channelName = routeInfo.prevNode()
+				pos = routeInfo.position - 1
+			}
+		default:
+			return fmt.Errorf("unknown direction")
+		}
+
+		if edge {
+			fid := info.GetString("dstID")
+			forward, ok := c.s.GetForward(fid)
+			if !ok {
+				return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
+			}
+			//send heartbeat response
+			if atomic.LoadUint32(&forward.state) == ForwardStateEstablished {
+				channel, ok := c.s.GetChannel(channelName)
+				if !ok {
+					return fmt.Errorf("check heartbeat to channel(%v), but not found", channelName)
+				}
+
+				writeJson(channel, CmdHeartbeatResp, goutil.Map{
+					"result": "success",
+					"route":     info.GetString("route"),
+					"position":  pos,
+					"fid":       fid,
+					"dstID":     info.GetString("fid"),
+					"direction": direction,
+				})
+			}
+		} else {
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("check heartbeat to channel(%v), but not found", channelName)
+			}
+
+			info.Set("position", pos)
+			writeJson(channel, msg.Cmd, info)
+		}
+	case CmdHeartbeatResp:
+		var (
+			edge        bool
+			channelName string
+			pos         int
+		)
+		switch info.GetString("direction") {
+		case RouteToRight:
+			if routeInfo.isEndNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.nextNode()
+				pos = routeInfo.position + 1
+			}
+		case RouteToLeft:
+			if routeInfo.isStartNode() {
+				edge = true
+			} else {
+				channelName = routeInfo.prevNode()
+				pos = routeInfo.position - 1
+			}
+		default:
+			return fmt.Errorf("unknown direction")
+		}
+
+		if edge {
+			fid := info.GetString("dstID")
+			forward, ok := c.s.GetForward(fid)
+			if !ok {
+				return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
+			}
+			forward.hbChan <- true
+		} else {
+			channel, ok := c.s.GetChannel(channelName)
+			if !ok {
+				return fmt.Errorf("send heartheaat info to channel(%v), but not found", channelName)
+			}
+
+			info.Set("position", pos)
+			writeJsonAndBytes(channel, msg.Cmd, info, data)
+		}
 	default:
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}

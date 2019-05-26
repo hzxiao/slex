@@ -7,6 +7,8 @@ const (
 	CmdForwardDialResp    = 0x04
 	CmdDataForward        = 0x05
 	CmdErrNotify          = 0x06
+	CmdHeartbeat          = 0x07
+	CmdHeartbeatResp      = 0x08
 )
 
 type Message struct {
