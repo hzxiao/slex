@@ -20,8 +20,6 @@ github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db/go.mod h1:/XxbfmMg8l
 github.com/gomodule/redigo v2.0.0+incompatible/go.mod h1:B4C85qUVwatsJoIUNIfCRsp7qO0iAmpGFZ4EELWSbC4=
 github.com/hzxiao/goutil v0.0.0-20190507061812-46c917d90968 h1:JOlBLBW6P+idUzsmTHb/O7cOerOEWamxts5Ab0G+2Uw=
 github.com/hzxiao/goutil v0.0.0-20190507061812-46c917d90968/go.mod h1:yWvyF1dMlvuyPSEFFBA4+2G8pF5ZLN/ENF+X5175InI=
-github.com/hzxiao/slex v0.0.0-20190321154238-d70d3ae7c69a h1:QraD5gfktYBDxYxInnmXZrc7aw1ONKEqiHGgeOUlI6k=
-github.com/hzxiao/slex v0.0.0-20190321154238-d70d3ae7c69a/go.mod h1:D+7u1bb+wc5qHLnRNAOLlV3UjhZL5sBi3iVQx0qRQyo=
 github.com/lib/pq v1.0.0/go.mod h1:5WUZQaWbwv1U+lTReE5YruASi9Al49XbQIvNi/34Woo=
 github.com/mattn/go-sqlite3 v1.10.0/go.mod h1:FPy6KqzDD04eiIsT53CuJW3U88zkxoIYsOqkbpncsNc=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=

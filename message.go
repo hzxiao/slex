@@ -1,5 +1,9 @@
 package slex
 
+import (
+	"github.com/hzxiao/goutil"
+)
+
 const (
 	CmdChannelConnect     = 0x01
 	CmdChannelConnectResp = 0x02
@@ -14,6 +18,20 @@ const (
 type Message struct {
 	Cmd  byte
 	Body []byte
+}
+
+//NewMessage new a message
+func NewMessage(cmd byte, info goutil.Map, data []byte) *Message {
+	infoBytes, _ := jsonEncode(info)
+	var body []byte
+	body = append(body, uint32ToBytes(uint32(len(infoBytes)))...)
+	body = append(body, infoBytes...)
+	body = append(body, data...)
+
+	return &Message{
+		Cmd:  cmd,
+		Body: body,
+	}
 }
 
 func (msg *Message) Marshal() []byte {

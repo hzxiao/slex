@@ -259,6 +259,21 @@ func (s *Slex) DeleteChannel(name string) (ok bool) {
 	return ok
 }
 
+//WriteToChannel write message to channel
+func (s *Slex) WriteToChannel(channalName string, msg *Message) error {
+	if msg == nil {
+		return fmt.Errorf("nil message")
+	}
+
+	channel, ok := s.Channels[channalName]
+	if !ok {
+		return fmt.Errorf("channel(%v) not found", channalName)
+	}
+
+	_, err := channel.WriteMessage(msg)
+	return err
+}
+
 func (s *Slex) AddForward(f *Forward) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()

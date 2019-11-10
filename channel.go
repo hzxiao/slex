@@ -42,6 +42,7 @@ func (c *Channel) Dial() (err error) {
 	return nil
 }
 
+//Connect connect to server to auth the channel
 func (c *Channel) Connect() (err error) {
 	err = c.Dial()
 	if err != nil {
@@ -137,6 +138,7 @@ func (c *Channel) loopRead() {
 	c.Close()
 }
 
+//Handle handle channel message
 func (c *Channel) Handle(msg *Message) error {
 	if msg == nil {
 		return fmt.Errorf("invalid message: null msg")
@@ -149,24 +151,49 @@ func (c *Channel) Handle(msg *Message) error {
 	if err != nil {
 		return err
 	}
+	next, err := parseNextNodeByDirect(routeInfo, info.GetString("direction"))
+	if err != nil {
+		return err
+	}
+
+	if !routeInfo.isEdgedNode(info.GetString("direction")) {
+		info.Set("position", next.position)
+		err = c.s.WriteToChannel(next.currentNode(), NewMessage(msg.Cmd, info, data))
+		if err != nil {
+			return fmt.Errorf("relay message of cmd(%v) to channel(%v) err: %v", msg.Cmd, next.currentNode(), err)
+		}
+		return nil
+	}
+
 	switch msg.Cmd {
 	case CmdForwardDial:
-		forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")))
-		if err != nil {
-			return err
-		}
+		if routeInfo.isEndNode() {
+			forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")))
+			if err != nil {
+				return err
+			}
+			if err = forward.DialDst(); err != nil {
+				return err
+			}
+			forward.DstID = info.GetString("fid")
 
-		if !forward.routeInfo.isEndNode() && !c.s.Config.Relay {
-			return fmt.Errorf("not support rely")
+			err = forward.s.AddForward(forward)
+			if err != nil {
+				return err
+			}
+			respInfo := goutil.Map{
+				"result":    "success",
+				"route":     routeInfo.raw,
+				"position":  next.position,
+				"fid":       forward.ID,
+				"dstID":     forward.DstID,
+				"direction": RouteToLeft,
+			}
+			err = c.s.WriteToChannel(next.currentNode(), NewMessage(CmdForwardDialResp, respInfo, nil))
+			if err != nil {
+				return err
+			}
 		}
-
-		forward.SrcID = info.GetString("fid")
-		//dial
-		err = forward.Dial()
-		if err != nil {
-			return fmt.Errorf("forward dial route(%v), position(%v) fail: %v", forward.routeInfo.raw, forward.routeInfo.position, err)
-		}
-
 	case CmdForwardDialResp:
 		if routeInfo.isStartNode() {
 			fid := info.GetString("dstID")
@@ -177,201 +204,55 @@ func (c *Channel) Handle(msg *Message) error {
 
 			forward.DstID = info.GetString("fid")
 			forward.ready <- true
-		} else {
-			channelName := routeInfo.prevNode()
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("write forward dial resp to channel(%v), but not found", channelName)
-			}
-
-			info.Set("position", routeInfo.position-1)
-			writeJson(channel, msg.Cmd, info)
 		}
-
 	case CmdDataForward:
-		var (
-			edge        bool
-			channelName string
-			pos         int
-		)
-		switch info.GetString("direction") {
-		case RouteToRight:
-			if routeInfo.isEndNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.nextNode()
-				pos = routeInfo.position + 1
-			}
-		case RouteToLeft:
-			if routeInfo.isStartNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.prevNode()
-				pos = routeInfo.position - 1
-			}
-		default:
-			return fmt.Errorf("unknown direction")
+		fid := info.GetString("dstID")
+		forward, ok := c.s.GetForward(fid)
+		if !ok {
+			return fmt.Errorf("write forward data to forward(%v), but not found", fid)
 		}
+		forward.Write(data)
 
-		if edge {
-			fid := info.GetString("dstID")
-			forward, ok := c.s.GetForward(fid)
-			if !ok {
-				return fmt.Errorf("write forward data to forward(%v), but not found", fid)
-			}
-			forward.Write(data)
-		} else {
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("write forward data to channel(%v), but not found", channelName)
-			}
-
-			info.Set("position", pos)
-			writeJsonAndBytes(channel, msg.Cmd, info, data)
-		}
 	case CmdErrNotify:
-		var (
-			edge        bool
-			channelName string
-			pos         int
-		)
-		switch info.GetString("direction") {
-		case RouteToRight:
-			if routeInfo.isEndNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.nextNode()
-				pos = routeInfo.position + 1
-			}
-		case RouteToLeft:
-			if routeInfo.isStartNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.prevNode()
-				pos = routeInfo.position - 1
-			}
-		default:
-			return fmt.Errorf("unknown direction")
+		fid := info.GetString("fid")
+		forward := c.s.DeleteForward(fid)
+		if forward != nil {
+			forward.Close()
 		}
 
-		if edge {
-			fid := info.GetString("fid")
-			forward := c.s.DeleteForward(fid)
-			if forward != nil {
-				forward.Close()
-			}
-		} else {
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("notify error info to channel(%v), but not found", channelName)
-			}
-
-			info.Set("position", pos)
-			writeJsonAndBytes(channel, msg.Cmd, info, data)
-		}
 	case CmdHeartbeat:
-		var (
-			edge        bool
-			channelName, direction string
-			pos         int
-		)
-		switch info.GetString("direction") {
-		case RouteToRight:
-			if routeInfo.isEndNode() {
-				edge = true
-				channelName = routeInfo.prevNode()
-				pos = routeInfo.position - 1
+		fid := info.GetString("dstID")
+		forward, ok := c.s.GetForward(fid)
+		if !ok {
+			return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
+		}
+		//send heartbeat response
+		if atomic.LoadUint32(&forward.state) == ForwardStateEstablished {
+			var direction string
+			if info.GetString("direction") == RouteToRight {
 				direction = RouteToLeft
 			} else {
-				channelName = routeInfo.nextNode()
-				pos = routeInfo.position + 1
-			}
-		case RouteToLeft:
-			if routeInfo.isStartNode() {
-				edge = true
-				channelName = routeInfo.nextNode()
-				pos = routeInfo.position + 1
 				direction = RouteToRight
-			} else {
-				channelName = routeInfo.prevNode()
-				pos = routeInfo.position - 1
-			}
-		default:
-			return fmt.Errorf("unknown direction")
-		}
-
-		if edge {
-			fid := info.GetString("dstID")
-			forward, ok := c.s.GetForward(fid)
-			if !ok {
-				return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
-			}
-			//send heartbeat response
-			if atomic.LoadUint32(&forward.state) == ForwardStateEstablished {
-				channel, ok := c.s.GetChannel(channelName)
-				if !ok {
-					return fmt.Errorf("check heartbeat to channel(%v), but not found", channelName)
-				}
-
-				writeJson(channel, CmdHeartbeatResp, goutil.Map{
-					"result": "success",
-					"route":     info.GetString("route"),
-					"position":  pos,
-					"fid":       fid,
-					"dstID":     info.GetString("fid"),
-					"direction": direction,
-				})
-			}
-		} else {
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("check heartbeat to channel(%v), but not found", channelName)
 			}
 
-			info.Set("position", pos)
-			writeJson(channel, msg.Cmd, info)
+			respInfo := goutil.Map{
+				"result":    "success",
+				"route":     info.GetString("route"),
+				"position":  next.position,
+				"fid":       fid,
+				"dstID":     info.GetString("fid"),
+				"direction": direction,
+			}
+			err = c.s.WriteToChannel(next.currentNode(), NewMessage(CmdHeartbeatResp, respInfo, nil))
+			return err 
 		}
 	case CmdHeartbeatResp:
-		var (
-			edge        bool
-			channelName string
-			pos         int
-		)
-		switch info.GetString("direction") {
-		case RouteToRight:
-			if routeInfo.isEndNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.nextNode()
-				pos = routeInfo.position + 1
-			}
-		case RouteToLeft:
-			if routeInfo.isStartNode() {
-				edge = true
-			} else {
-				channelName = routeInfo.prevNode()
-				pos = routeInfo.position - 1
-			}
-		default:
-			return fmt.Errorf("unknown direction")
+		fid := info.GetString("dstID")
+		forward, ok := c.s.GetForward(fid)
+		if !ok {
+			return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
 		}
-
-		if edge {
-			fid := info.GetString("dstID")
-			forward, ok := c.s.GetForward(fid)
-			if !ok {
-				return fmt.Errorf("check heartbeat to forward(%v), but not found", fid)
-			}
-			forward.hbChan <- true
-		} else {
-			channel, ok := c.s.GetChannel(channelName)
-			if !ok {
-				return fmt.Errorf("send heartheaat info to channel(%v), but not found", channelName)
-			}
-
-			info.Set("position", pos)
-			writeJsonAndBytes(channel, msg.Cmd, info, data)
-		}
+		forward.hbChan <- true
 	default:
 		return fmt.Errorf("unknown cmd(%v)", msg.Body)
 	}

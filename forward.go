@@ -60,6 +60,33 @@ func parseRoute(rawRoute string, position int) (*route, error) {
 	return r, nil
 }
 
+func parseNextNodeByDirect(r *route, direction string) (*route, error) {
+	if r == nil {
+		return nil, fmt.Errorf("nil route")
+	}
+
+	next := *r
+	var pos int
+	switch direction {
+	case RouteToRight:
+		if r.isEndNode() {
+			pos = r.position - 1
+		} else {
+			pos = r.position + 1
+		}
+	case RouteToLeft:
+		if r.isStartNode() {
+			pos = r.position + 1
+		} else {
+			pos = r.position - 1
+		}
+	default:
+		return nil, fmt.Errorf("unknown direction")
+	}
+	next.position = pos
+	return &next, nil
+}
+
 func (r *route) isStartNode() bool {
 	return r.position == 0
 }
@@ -76,13 +103,26 @@ func (r *route) prevNode() string {
 	return r.nodes[r.position-1]
 }
 
+func (r *route) isEdgedNode(diraction string) bool {
+	switch diraction {
+	case RouteToRight:
+		return r.isEndNode()
+	case RouteToLeft:
+		return r.isStartNode()
+	}
+	return false
+}
+
+func (r *route) currentNode() string {
+	return r.nodes[r.position]
+}
+
 type Forward struct {
 	Conn
 
 	ID string
 
 	routeInfo *route
-	SrcID     string
 	DstID     string
 
 	ready   chan bool
@@ -199,49 +239,16 @@ func (f *Forward) loopRead() {
 
 //Dial start to dial target addr via slex node
 func (f *Forward) Dial() (err error) {
-	var channelName, fid, dstID string
-	var cmd byte
-	var pos int
-	if f.routeInfo.isEndNode() {
-		err = f.DialDst()
-		if err != nil {
-			return err
-		}
-		channelName = f.routeInfo.prevNode()
-		fid = f.ID
-		dstID = f.SrcID
-		cmd = CmdForwardDialResp
-		pos = f.routeInfo.position - 1
-	} else {
-		channelName = f.routeInfo.nextNode()
-		fid = f.SrcID
-		cmd = CmdForwardDial
-		pos = f.routeInfo.position + 1
+	info := goutil.Map{
+		"result":    "success",
+		"route":     f.routeInfo.raw,
+		"position":  f.routeInfo.position + 1,
+		"fid":       f.ID,
+		"direction": RouteToRight,
 	}
 
-	channel, ok := f.s.GetChannel(channelName)
-	if !ok {
-		return fmt.Errorf("chanel(%v) not found", channelName)
-	}
-
-	writeJson(channel, cmd, goutil.Map{
-		"result":   "success",
-		"route":    f.routeInfo.raw,
-		"position": pos,
-		"fid":      fid,
-		"dstID":    dstID,
-	})
-
-	//add to slex
-	if f.routeInfo.isEndNode() {
-		f.DstID = dstID
-		f.SrcID = f.ID
-		err = f.s.AddForward(f)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	channelName := f.routeInfo.nextNode()
+	return f.s.WriteToChannel(channelName, NewMessage(CmdForwardDial, info, nil))
 }
 
 func (f *Forward) DialDst() (err error) {
@@ -384,6 +391,5 @@ func (creator *ForwardCreator) Create(raw net.Conn) (*Forward, error) {
 		return nil, err
 	}
 	f.Conn = newConn(raw)
-	f.SrcID = f.ID
 	return f, nil
 }
