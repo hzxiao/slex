@@ -119,9 +119,11 @@ func (c *Channel) loopRead() {
 		err = c.Handle(msg)
 		if err != nil {
 			log.Error("[Channel] handle message on channel(%v) err: %v", c.RemoteAddr, err)
-			err = c.NotifyError(msg, err)
-			if err != nil {
-				log.Error("[Forward] notify error info err: %v", err)
+			if msg.Cmd != CmdErrNotify {
+				err = c.NotifyError(msg, err)
+				if err != nil {
+					log.Error("[Forward] notify error info err: %v", err)
+				}
 			}
 		}
 	}
@@ -143,20 +145,27 @@ func (c *Channel) Handle(msg *Message) error {
 	if msg == nil {
 		return fmt.Errorf("invalid message: null msg")
 	}
+	//decode message body
 	info, data, err := decodeJsonAndBytes(msg.Body)
 	if err != nil {
 		return err
 	}
-	routeInfo, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")))
+	//current node info
+	current, err := parseRoute(info.GetString("route"), int(info.GetInt64("position")))
 	if err != nil {
 		return err
 	}
-	next, err := parseNextNodeByDirect(routeInfo, info.GetString("direction"))
+	//next node info by direction
+	next, err := parseNextNodeByDirect(current, info.GetString("direction"))
 	if err != nil {
 		return err
 	}
 
-	if !routeInfo.isEdgedNode(info.GetString("direction")) {
+	if msg.Cmd == CmdForwardDial && !c.s.Config.Relay  {
+		return fmt.Errorf("not support relay")
+	}
+
+	if !current.isEdgedNode(info.GetString("direction")) {
 		info.Set("position", next.position)
 		err = c.s.WriteToChannel(next.currentNode(), NewMessage(msg.Cmd, info, data))
 		if err != nil {
@@ -167,7 +176,7 @@ func (c *Channel) Handle(msg *Message) error {
 
 	switch msg.Cmd {
 	case CmdForwardDial:
-		if routeInfo.isEndNode() {
+		if current.isEndNode() {
 			forward, err := NewForward(c.s, info.GetString("route"), int(info.GetInt64("position")))
 			if err != nil {
 				return err
@@ -183,7 +192,7 @@ func (c *Channel) Handle(msg *Message) error {
 			}
 			respInfo := goutil.Map{
 				"result":    "success",
-				"route":     routeInfo.raw,
+				"route":     current.raw,
 				"position":  next.position,
 				"fid":       forward.ID,
 				"dstID":     forward.DstID,
@@ -195,7 +204,7 @@ func (c *Channel) Handle(msg *Message) error {
 			}
 		}
 	case CmdForwardDialResp:
-		if routeInfo.isStartNode() {
+		if current.isStartNode() {
 			fid := info.GetString("dstID")
 			forward, ok := c.s.GetForward(fid)
 			if !ok {
