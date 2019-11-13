@@ -11,10 +11,12 @@ import (
 )
 
 type Config struct {
-	Name   string
-	Listen string
-	Relay  bool
-	Access []struct {
+	Name       string
+	Listen     string
+	Relay      bool
+	ServerCert string `yaml:"server_cert"`
+	ServerKey  string `yaml:"server_key"`
+	Access     []struct {
 		Name  string
 		Token string
 	}

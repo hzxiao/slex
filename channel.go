@@ -1,11 +1,11 @@
 package slex
 
 import (
+	"crypto/tls"
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
 	"io"
-	"net"
 	"sync/atomic"
 	"time"
 )
@@ -33,8 +33,13 @@ type Channel struct {
 	reconnect uint32 //1: need to reconnect to the server
 }
 
+//Dial connect to server
 func (c *Channel) Dial() (err error) {
-	raw, err := net.DialTimeout(SchemeTCP, c.RemoteAddr, time.Second*15)
+	conf := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	
+	raw, err := tls.Dial(SchemeTCP, c.RemoteAddr, conf)
 	if err != nil {
 		return
 	}

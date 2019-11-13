@@ -1,6 +1,7 @@
 package slex
 
 import (
+	"crypto/tls"
 	"fmt"
 	"github.com/hzxiao/goutil"
 	"github.com/hzxiao/goutil/log"
@@ -100,10 +101,17 @@ func (s *Slex) InitForwards() error {
 }
 
 func (s *Slex) listenAndAccept() error {
-	listen, err := net.Listen(SchemeTCP, s.Config.Listen)
+	cert, err := tls.LoadX509KeyPair(s.Config.ServerCert, s.Config.ServerKey)
 	if err != nil {
 		return err
 	}
+	config := &tls.Config{Certificates: []tls.Certificate{cert}}
+	listen, err := tls.Listen(SchemeTCP, s.Config.Listen, config)
+	if err != nil {
+		return err
+	}
+	defer listen.Close()
+
 	log.Info("[Slex] listen at %v", s.Config.Listen)
 	go func() {
 		for {

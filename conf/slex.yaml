@@ -5,6 +5,9 @@ listen: :2303
 # Defines whether a route can pass through the node
 relay: true
 
+server_cert: server.pem
+server_key: server.key
+
 access:
   -
     name: Client
