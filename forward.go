@@ -198,7 +198,7 @@ func (f *Forward) loopRead() {
 
 	go f.StartHeartbeat()
 
-	log.Info("[Forward] start to read from (%v)...", f.ID)
+	log.Info("[Forward] start to read from (%v) to (%v)...", f.ID, f.DstID)
 	buf := make([]byte, 4096)
 	for {
 		var n int
@@ -254,7 +254,7 @@ func (f *Forward) Dial() (err error) {
 func (f *Forward) DialDst() (err error) {
 	// check whether the addr allowed to be dialed
 	if !f.s.Config.AllowDialAddr(f.routeInfo.destination) {
-		return fmt.Errorf("not allowed address")
+		return fmt.Errorf("not allowed address: %v", f.routeInfo.destination)
 	}
 
 	c, err := net.DialTimeout(f.routeInfo.scheme, f.routeInfo.destination, time.Second*15)
@@ -269,8 +269,10 @@ func (f *Forward) DialDst() (err error) {
 
 func (f *Forward) StartHeartbeat() {
 	go func() {
+		log.Info("[Forward] forward(%v) start to send heartbeat", f.ID)
+		defer log.Info("[Forward] forward(%v) stop sending heartbeat", f.ID)
 		ticker := time.NewTicker(5 * time.Second)
-		for {
+		for atomic.LoadUint32(&f.state) == ForwardStateEstablished {
 			<-ticker.C
 			//send heartbeat
 			var channelName, direction string
@@ -285,17 +287,21 @@ func (f *Forward) StartHeartbeat() {
 				direction = RouteToRight
 			}
 
-			channel, ok := f.s.GetChannel(channelName)
-			if !ok {
+			err := f.s.WriteToChannel(channelName, NewMessage(
+				CmdHeartbeat,
+				goutil.Map{
+					"route":     f.routeInfo.raw,
+					"direction": direction,
+					"position":  pos,
+					"fid":       f.ID,
+					"dstID":     f.DstID,
+				},
+				nil,
+			))
+			if err != nil {
+				log.Error("[Forward] send heartbeat to channel(%v) error: %v", channelName, err)
 				break
 			}
-			writeJson(channel, CmdHeartbeat, goutil.Map{
-				"route":     f.routeInfo.raw,
-				"direction": direction,
-				"position":  pos,
-				"fid":       f.ID,
-				"dstID":     f.DstID,
-			})
 		}
 	}()
 
@@ -304,6 +310,7 @@ func (f *Forward) StartHeartbeat() {
 		case <-time.After(10 * time.Second):
 			log.Error("[Forward] src(%v) -> dst(%v) heartbeat timeout", f.ID, f.DstID)
 			f.Close()
+			return
 		case <-f.hbChan:
 		}
 	}
@@ -314,6 +321,8 @@ func (f *Forward) Close() error {
 		f.Conn.Close()
 	}
 	atomic.StoreUint32(&f.state, ForwardStateClosed)
+	// close(f.hbChan)
+	// close(f.ready)
 	return nil
 }
 

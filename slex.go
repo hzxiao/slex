@@ -110,10 +110,10 @@ func (s *Slex) listenAndAccept() error {
 	if err != nil {
 		return err
 	}
-	defer listen.Close()
 
 	log.Info("[Slex] listen at %v", s.Config.Listen)
 	go func() {
+		defer listen.Close()
 		for {
 			conn, err := listen.Accept()
 			if err != nil {

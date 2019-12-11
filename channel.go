@@ -186,6 +186,7 @@ func (c *Channel) Handle(msg *Message) error {
 			if err != nil {
 				return err
 			}
+			// time.Sleep(10*time.Second)
 			if err = forward.DialDst(); err != nil {
 				return err
 			}
@@ -233,7 +234,7 @@ func (c *Channel) Handle(msg *Message) error {
 		if forward != nil {
 			forward.Close()
 		}
-
+		log.Error("[Chaanel] forward(%v) recv error: %v", fid, info.GetString("message"))
 	case CmdHeartbeat:
 		fid := info.GetString("dstID")
 		forward, ok := c.s.GetForward(fid)
@@ -288,22 +289,17 @@ func (c *Channel) NotifyError(msg *Message, cause error) error {
 
 	var channelName, direction string
 	var pos int
-	switch {
-	case msg.Cmd == CmdForwardDial ||
-		(msg.Cmd == CmdDataForward && info.GetString("direction") == RouteToRight):
+	if info.GetString("direction") == RouteToRight {
 		channelName = routeInfo.prevNode()
 		pos = routeInfo.position - 1
 		direction = RouteToLeft
-	case msg.Cmd == CmdForwardDialResp ||
-		(msg.Cmd == CmdDataForward && info.GetString("direction") == RouteToLeft):
+	} else {
 		channelName = routeInfo.nextNode()
 		pos = routeInfo.position + 1
 		direction = RouteToRight
-	case msg.Cmd == CmdErrNotify:
-		return nil
 	}
 
-	info.Set("massage", cause)
+	info.Set("message", cause.Error())
 	info.Set("position", pos)
 	info.Set("direction", direction)
 	channel, ok := c.s.GetChannel(channelName)
